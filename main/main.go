@@ -36,6 +36,7 @@ func CatchMessage(update tgbotapi.Update) {
 		}
 		return
 	}
+
 }
 
 func main() {
