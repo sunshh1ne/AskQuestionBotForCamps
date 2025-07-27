@@ -3,6 +3,7 @@ package main
 import (
 	"config"
 	"database/sql"
+	"fmt"
 	"log"
 	"my_database"
 	"sync"
@@ -17,31 +18,69 @@ var bot tgbot.TGBot
 var cfg config.Config
 var MU sync.Mutex
 
+func isTableEmpty(tableName string) bool {
+	var count int
+	err := DB.DB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+	return count == 0
+}
+
+func isAdmin(user *tgbotapi.User) bool {
+	userID := user.ID
+	var exists bool
+	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM admins WHERE user_id = ?)", userID).Scan(&exists)
+	if err != nil {
+		log.Println(err)
+	}
+	return exists
+}
+
+func addAdmin(user *tgbotapi.User) {
+	if isAdmin(user) {
+		return
+	}
+	userID := user.ID
+	_, err := DB.DB.Exec("INSERT INTO admins (user_id) VALUES (?)", userID)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
 func CatchMessage(update tgbotapi.Update) {
 	MU.Lock()
 	defer MU.Unlock()
-	user_id := update.Message.From.ID
-	var exists bool
-	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = ?);", user_id).Scan(&exists)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if !exists {
-		_, err := DB.DB.Exec("INSERT INTO users(user_id, user_group) VALUES (?, 0);", user_id)
+
+	chat := update.Message.Chat
+	user := update.Message.From
+
+	if chat.Type == "private" {
+		userID := user.ID
+		var exists bool
+		err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = ?)", userID).Scan(&exists)
 		if err != nil {
-			log.Fatal(err)
+			log.Println("Ошибка проверки пользователя:", err)
+			return
+		}
+
+		if !exists {
+			_, err := DB.DB.Exec("INSERT INTO users(user_id, user_group) VALUES (?, 0)", userID)
+			if err != nil {
+				log.Println("Ошибка добавления пользователя:", err)
+			}
+		}
+
+		//first user -> admin
+		if isTableEmpty("admins") {
+			addAdmin(user)
 		}
 	}
 
-	//add admin
-	//if update.Message.Text == cfg.Keyword {
-	//	_, err := DB.DB.Exec("INSERT OR IGNORE INTO admins(user_id) VALUES (?);", user_id)
-	//	if err != nil {
-	//		log.Fatal(err)
-	//	}
-	//	return
-	//}
-
+	if chat.Type == "group" || chat.Type == "supergroup" {
+		log.Println("Сообщение в группе %d от пользователя %d", chat.ID, user.ID)
+	}
 }
 
 func main() {
