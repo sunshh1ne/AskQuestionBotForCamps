@@ -39,6 +39,9 @@ func createTables(db *sql.DB) {
                        			NOT NULL,
     		user_group INTEGER
 		);`,
+		`CREATE TABLE IF NOT EXISTS passwords (
+    		password TEXT
+    	);`,
 	}
 
 	for _, tableSQL := range tables {

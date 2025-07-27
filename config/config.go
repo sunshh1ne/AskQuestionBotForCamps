@@ -7,8 +7,8 @@ import (
 )
 
 type Config struct {
-	TGBotKey string `json:"tgbotkey"`
-	Keyword  string `json:"keyword"`
+	TGBotKey  string `json:"tgbotkey"`
+	LenOfPass int    `json:"lenofpass"`
 }
 
 func LoadConfig(filename string) Config {

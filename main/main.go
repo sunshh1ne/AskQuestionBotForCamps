@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 	"my_database"
+	"sync"
 	"tgbot"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -14,8 +15,11 @@ import (
 var DB my_database.DataBaseSites
 var bot tgbot.TGBot
 var cfg config.Config
+var MU sync.Mutex
 
 func CatchMessage(update tgbotapi.Update) {
+	MU.Lock()
+	defer MU.Unlock()
 	user_id := update.Message.From.ID
 	var exists bool
 	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = ?);", user_id).Scan(&exists)
@@ -29,13 +33,14 @@ func CatchMessage(update tgbotapi.Update) {
 		}
 	}
 
-	if update.Message.Text == cfg.Keyword {
-		_, err := DB.DB.Exec("INSERT OR IGNORE INTO admins(user_id) VALUES (?);", user_id)
-		if err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
+	//add admin
+	//if update.Message.Text == cfg.Keyword {
+	//	_, err := DB.DB.Exec("INSERT OR IGNORE INTO admins(user_id) VALUES (?);", user_id)
+	//	if err != nil {
+	//		log.Fatal(err)
+	//	}
+	//	return
+	//}
 
 }
 
