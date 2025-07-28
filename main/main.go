@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"my_database"
+	"password"
 	"sync"
 	"tgbot"
 
@@ -49,6 +50,70 @@ func addAdmin(user *tgbotapi.User) {
 	}
 }
 
+func isPassword(text string) bool {
+	var exists bool
+	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM passwords WHERE password = ?)", text).Scan(&exists)
+	if err != nil {
+		log.Println(err)
+	}
+	return exists
+}
+
+func delPassword(text string) {
+	_, err := DB.DB.Exec("DELETE FROM passwords WHERE password = ?", text)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func adminByLink(update tgbotapi.Update) bool {
+	text := update.Message.CommandArguments()
+	if isPassword(text) {
+		addAdmin(update.Message.From)
+		delPassword(text)
+		return true
+	}
+	return false
+}
+
+func GetLink() string {
+	pass := password.GetPassword(DB.DB, cfg.LenOfPass)
+	url := "https://t.me/MoscowProgrammingTeam_bot?start=" + pass
+	return url
+}
+
+func CatchPrivateCommand(update tgbotapi.Update) {
+	command := update.Message.Command()
+	switch command {
+	case "start":
+		newAdmin := adminByLink(update)
+		if newAdmin {
+
+		} else {
+
+		}
+	case "getlink":
+		if isAdmin(update.Message.From) {
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Ссылка на добавление администратора: "+GetLink())
+			_, err := bot.Bot.Send(msg)
+			if err != nil {
+				log.Println(err)
+			}
+		} else {
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Спички детям не игрушка!")
+			_, err := bot.Bot.Send(msg)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	}
+
+}
+
+func CatchGroupCommand(update tgbotapi.Update) {
+
+}
+
 func CatchMessage(update tgbotapi.Update) {
 	MU.Lock()
 	defer MU.Unlock()
@@ -56,30 +121,40 @@ func CatchMessage(update tgbotapi.Update) {
 	chat := update.Message.Chat
 	user := update.Message.From
 
-	if chat.Type == "private" {
-		userID := user.ID
-		var exists bool
-		err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = ?)", userID).Scan(&exists)
+	userID := user.ID
+	var exists bool
+	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE user_id = ?)", userID).Scan(&exists)
+	if err != nil {
+		log.Println("Ошибка проверки пользователя:", err)
+		return
+	}
+
+	if !exists {
+		_, err := DB.DB.Exec("INSERT INTO users(user_id, user_group) VALUES (?, 0)", userID)
 		if err != nil {
-			log.Println("Ошибка проверки пользователя:", err)
-			return
-		}
-
-		if !exists {
-			_, err := DB.DB.Exec("INSERT INTO users(user_id, user_group) VALUES (?, 0)", userID)
-			if err != nil {
-				log.Println("Ошибка добавления пользователя:", err)
-			}
-		}
-
-		//first user -> admin
-		if isTableEmpty("admins") {
-			addAdmin(user)
+			log.Println("Ошибка добавления пользователя:", err)
 		}
 	}
 
+	//first user -> admin
+	if isTableEmpty("admins") {
+		addAdmin(user)
+	}
+
+	if chat.Type == "private" {
+		if update.Message.IsCommand() {
+			CatchPrivateCommand(update)
+			return
+		}
+
+	}
+
 	if chat.Type == "group" || chat.Type == "supergroup" {
-		log.Println("Сообщение в группе %d от пользователя %d", chat.ID, user.ID)
+		if update.Message.IsCommand() {
+			CatchGroupCommand(update)
+			return
+		}
+
 	}
 }
 
