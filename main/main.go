@@ -37,10 +37,20 @@ func adminByLink(update tgbotapi.Update) bool {
 	return false
 }
 
-func GetLink() string {
+func GetLinkForAdmin() string {
 	pass := DB.GetPassword(cfg.LenOfPass)
 	url := "https://t.me/MoscowProgrammingTeam_bot?start=" + pass
 	return url
+}
+
+func inGroupByLink(update tgbotapi.Update) int {
+	text := update.Message.CommandArguments()
+	group := DB.GroupByKeyword(text)
+	if group != -1 {
+		DB.AddInGroup(update, group)
+		//	добавили юзера к группе
+	}
+	return group
 }
 
 func CatchPrivateCommand(update tgbotapi.Update) {
@@ -49,13 +59,16 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 	case "start":
 		newAdmin := adminByLink(update)
 		if newAdmin {
-
-		} else {
-
+			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы получили права администратора.")
 		}
+		grouplink := inGroupByLink(update)
+		if grouplink != -1 {
+			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы записаны в группу")
+		}
+
 	case "getlink":
 		if DB.IsAdmin(update.Message.From) {
-			bot.SendMessage(update.Message.From.ID, "Ссылка на добавление администратора: "+GetLink())
+			bot.SendMessage(update.Message.From.ID, "Ссылка на добавление администратора: "+GetLinkForAdmin())
 		} else {
 			bot.SendMessage(update.Message.From.ID, "Спички детям не игрушка!")
 			detectYoungHacker(update)
@@ -65,7 +78,34 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 }
 
 func CatchGroupCommand(update tgbotapi.Update) {
+	command := update.Message.Command()
+	switch command {
+	case "getlink":
+		if DB.IsAdmin(update.Message.From) {
+			bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update))
+		} else {
+			bot.SendMessage(int(update.Message.Chat.ID), "Спички детям не игрушка!")
+			detectYoungHacker(update)
+		}
+	}
+}
 
+func getLinkForUsers(update tgbotapi.Update) string {
+	keyword := DB.GetKeyword(update)
+	url := "https://t.me/MoscowProgrammingTeam_bot?start=" + keyword
+	return url
+}
+
+func addInNewGroup(update tgbotapi.Update) {
+	if !DB.IsAdmin(update.Message.From) {
+		detectYoungHacker(update)
+		_, err := bot.Bot.LeaveChat(tgbotapi.ChatConfig{
+			ChatID: update.Message.Chat.ID,
+		})
+		catchError(err)
+		return
+	}
+	DB.NewChat(update)
 }
 
 func CatchMessage(update tgbotapi.Update) {
@@ -99,6 +139,14 @@ func CatchMessage(update tgbotapi.Update) {
 	}
 
 	if chat.Type == "group" || chat.Type == "supergroup" {
+		if update.Message.NewChatMembers != nil {
+			for _, member := range *update.Message.NewChatMembers {
+				if member.ID == bot.Bot.Self.ID {
+					addInNewGroup(update)
+				}
+			}
+		}
+
 		if update.Message.IsCommand() {
 			CatchGroupCommand(update)
 		} else {

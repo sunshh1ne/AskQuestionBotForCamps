@@ -109,3 +109,41 @@ func (DB *DataBaseSites) GetPassword(len int) string {
 	}
 	return password
 }
+
+func (DB *DataBaseSites) NewChat(update tgbotapi.Update) {
+	keyword := random.GetRandom(20)
+	_, err := DB.DB.Exec("INSERT INTO chats(chat_id, keyword) VALUES (?, ?);", update.Message.Chat.ID, keyword)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func (DB *DataBaseSites) GetKeyword(update tgbotapi.Update) string {
+	chatID := update.Message.Chat.ID
+	var keyword string
+	err := DB.DB.QueryRow("SELECT keyword FROM chats WHERE chat_id = ?", chatID).Scan(&keyword)
+	if err != nil {
+		log.Println(err)
+	}
+	return keyword
+}
+
+func (DB *DataBaseSites) GroupByKeyword(text string) int {
+	var chatID int
+	err := DB.DB.QueryRow("SELECT chat_id FROM chats WHERE keyword = ?", text).Scan(&chatID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return -1
+		}
+		log.Println(err)
+	}
+	return chatID
+}
+
+func (DB *DataBaseSites) AddInGroup(update tgbotapi.Update, newGroup int) {
+	userID := update.Message.Chat.ID
+	_, err := DB.DB.Exec("UPDATE users SET user_group = ? WHERE user_id = ?", newGroup, userID)
+	if err != nil {
+		log.Println(err)
+	}
+}
