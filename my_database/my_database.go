@@ -2,9 +2,11 @@ package my_database
 
 import (
 	"database/sql"
-	"log"
-
+	"fmt"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	_ "github.com/mattn/go-sqlite3"
+	"log"
+	"random"
 )
 
 type DataBaseSites struct {
@@ -50,4 +52,60 @@ func createTables(db *sql.DB) {
 			log.Fatalf("Ошибка при создании таблицы: %v\nSQL: %s", err, tableSQL)
 		}
 	}
+}
+
+func (DB *DataBaseSites) IsAdmin(user *tgbotapi.User) bool {
+	userID := user.ID
+	var exists bool
+	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM admins WHERE user_id = ?)", userID).Scan(&exists)
+	if err != nil {
+		log.Println(err)
+	}
+	return exists
+}
+
+func (DB *DataBaseSites) AddAdmin(user *tgbotapi.User) {
+	if DB.IsAdmin(user) {
+		return
+	}
+	userID := user.ID
+	_, err := DB.DB.Exec("INSERT INTO admins (user_id) VALUES (?)", userID)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func (DB *DataBaseSites) IsPassword(text string) bool {
+	var exists bool
+	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM passwords WHERE password = ?)", text).Scan(&exists)
+	if err != nil {
+		log.Println(err)
+	}
+	return exists
+}
+
+func (DB *DataBaseSites) DelPassword(text string) {
+	_, err := DB.DB.Exec("DELETE FROM passwords WHERE password = ?", text)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func (DB *DataBaseSites) IsTableEmpty(tableName string) bool {
+	var count int
+	err := DB.DB.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+	return count == 0
+}
+
+func (DB *DataBaseSites) GetPassword(len int) string {
+	password := random.GetRandom(len)
+	_, err := DB.DB.Exec("INSERT INTO passwords(password) VALUES (?);", password)
+	if err != nil {
+		log.Println(err)
+	}
+	return password
 }

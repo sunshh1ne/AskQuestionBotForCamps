@@ -34,14 +34,17 @@ func RemoveNonUTF8Runes(s string) string {
 }
 
 func (bot *TGBot) SendMessage(id int, message string) tgbotapi.Message {
-	message = RemoveNonUTF8Runes(message)
-	msg := tgbotapi.NewMessage(int64(id), message)
-	msg.ParseMode = tgbotapi.ModeMarkdown
-	msg.DisableWebPagePreview = true
-	msg_sended, err := bot.Bot.Send(msg)
-
+	msg, err := bot.Bot.Send(tgbotapi.NewMessage(int64(id), message))
 	if err != nil {
 		log.Println(err)
 	}
-	return msg_sended
+	return msg
+}
+
+func (bot *TGBot) SendForward(id1, id2, id3 int) int {
+	msg, err := bot.Bot.Send(tgbotapi.NewForward(int64(id1), int64(id2), id3))
+	if err != nil {
+		log.Println(err)
+	}
+	return msg.MessageID
 }

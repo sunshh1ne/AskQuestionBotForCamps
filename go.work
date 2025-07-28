@@ -5,5 +5,5 @@ use (
 	./main
 	./my_database
 	./tgbot
-	./password
+	./random
 )
