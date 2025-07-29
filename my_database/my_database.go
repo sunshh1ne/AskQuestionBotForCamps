@@ -44,6 +44,11 @@ func createTables(db *sql.DB) {
 		`CREATE TABLE IF NOT EXISTS passwords (
     		password TEXT
     	);`,
+		`CREATE TABLE IF NOT EXISTS not_answered_questions (
+			user_id       INTEGER,
+			admin_chat_id INTEGER,
+			user_chat_id  INTEGER
+		);`,
 	}
 
 	for _, tableSQL := range tables {
@@ -143,6 +148,26 @@ func (DB *DataBaseSites) GroupByKeyword(text string) int {
 func (DB *DataBaseSites) AddInGroup(update tgbotapi.Update, newGroup int) {
 	userID := update.Message.Chat.ID
 	_, err := DB.DB.Exec("UPDATE users SET user_group = ? WHERE user_id = ?", newGroup, userID)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func (DB *DataBaseSites) GetGroup(update tgbotapi.Update) int {
+	userID := update.Message.Chat.ID
+	var group int
+	err := DB.DB.QueryRow("SELECT user_group FROM users WHERE user_id = ?", userID).Scan(&group)
+	if err != nil {
+		log.Println(err)
+	}
+	return group
+}
+
+func (DB *DataBaseSites) AddQuestion(update tgbotapi.Update, reply tgbotapi.Message) {
+	//	update - сообщение которое бот получил
+	//	reply - сообщение которое бот переслал в чат (копия, ответ на которую мы ждем)
+	_, err := DB.DB.Exec("INSERT INTO not_answered_questions(user_id, admin_chat_id, user_chat_id) VALUES (?, ?, ?);",
+		update.Message.From.ID, reply.MessageID, update.Message.MessageID)
 	if err != nil {
 		log.Println(err)
 	}

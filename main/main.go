@@ -43,7 +43,7 @@ func GetLinkForAdmin() string {
 	return url
 }
 
-func inGroupByLink(update tgbotapi.Update) int {
+func groupByLink(update tgbotapi.Update) int {
 	text := update.Message.CommandArguments()
 	group := DB.GroupByKeyword(text)
 	if group != -1 {
@@ -61,9 +61,9 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 		if newAdmin {
 			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы получили права администратора.")
 		}
-		grouplink := inGroupByLink(update)
+		grouplink := groupByLink(update)
 		if grouplink != -1 {
-			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы записаны в группу")
+			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы записаны в группу. Чтобы задать вопрос, напишите мне сообщение, я перешлю его преподавателям")
 		}
 
 	case "getlink":
@@ -108,6 +108,16 @@ func addInNewGroup(update tgbotapi.Update) {
 	DB.NewChat(update)
 }
 
+func forwardToGroup(update tgbotapi.Update, group int64) {
+	msg := update.Message
+	forward := tgbotapi.NewForward(group, msg.Chat.ID, msg.MessageID)
+	sent, err := bot.Bot.Send(forward)
+	if err != nil {
+		log.Printf("Ошибка пересылки: %v", err)
+	}
+	DB.AddQuestion(update, sent)
+}
+
 func CatchMessage(update tgbotapi.Update) {
 	MU.Lock()
 	defer MU.Unlock()
@@ -121,7 +131,7 @@ func CatchMessage(update tgbotapi.Update) {
 	catchError(err)
 
 	if !exists {
-		_, err := DB.DB.Exec("INSERT INTO users(user_id, user_group) VALUES (?, 0)", userID)
+		_, err := DB.DB.Exec("INSERT INTO users(user_id, user_group) VALUES (?, -1)", userID)
 		catchError(err)
 	}
 
@@ -134,7 +144,12 @@ func CatchMessage(update tgbotapi.Update) {
 		if update.Message.IsCommand() {
 			CatchPrivateCommand(update)
 		} else {
-
+			group := DB.GetGroup(update)
+			if group == -1 {
+				bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.")
+			} else {
+				forwardToGroup(update, int64(group))
+			}
 		}
 	}
 
@@ -173,7 +188,7 @@ func main() {
 	for update := range updates {
 		if update.Message != nil {
 			CatchMessage(update)
-		} else if update.CallbackQuery != nil {
+		} else {
 
 		}
 	}
