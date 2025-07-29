@@ -3,13 +3,12 @@ package main
 import (
 	"config"
 	"database/sql"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"my_database"
 	"sync"
 	"tgbot"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 var DB my_database.DataBaseSites
@@ -110,12 +109,65 @@ func addInNewGroup(update tgbotapi.Update) {
 
 func forwardToGroup(update tgbotapi.Update, group int64) {
 	msg := update.Message
-	forward := tgbotapi.NewForward(group, msg.Chat.ID, msg.MessageID)
-	sent, err := bot.Bot.Send(forward)
+	sent, err := bot.Bot.Send(tgbotapi.NewForward(group, msg.Chat.ID, msg.MessageID))
 	if err != nil {
 		log.Printf("Ошибка пересылки: %v", err)
 	}
 	DB.AddQuestion(update, sent)
+}
+
+func replyAdmin(update tgbotapi.Update) {
+	repliedMsg := update.Message.ReplyToMessage
+
+	userChatID, exists := DB.GetUserChatIdByAdminChatId(*repliedMsg)
+	if !exists {
+		log.Println("Не найдено исходное сообщение пользователя")
+		return
+	}
+
+	log.Println(userChatID)
+	_, err := bot.Bot.Send(tgbotapi.NewForward(int64(userChatID), update.Message.Chat.ID, update.Message.MessageID))
+	if err != nil {
+		log.Println(err)
+	}
+
+	DB.DelQuestion(*repliedMsg)
+}
+
+func CatchPrivateMessage(update tgbotapi.Update) {
+	if update.Message.IsCommand() {
+		CatchPrivateCommand(update)
+	} else {
+		group := DB.GetGroup(update)
+		if group == -1 {
+			bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.")
+		} else {
+			forwardToGroup(update, int64(group))
+		}
+	}
+}
+
+func CatchGroupMessage(update tgbotapi.Update) {
+	if !DB.IsAdmin(update.Message.From) {
+		detectYoungHacker(update)
+		return
+	}
+
+	if update.Message.NewChatMembers != nil {
+		for _, member := range *update.Message.NewChatMembers {
+			if member.ID == bot.Bot.Self.ID {
+				addInNewGroup(update)
+			}
+		}
+	}
+
+	if update.Message.IsCommand() {
+		CatchGroupCommand(update)
+	} else {
+		if update.Message.ReplyToMessage != nil && update.Message.ReplyToMessage.From.IsBot {
+			replyAdmin(update)
+		}
+	}
 }
 
 func CatchMessage(update tgbotapi.Update) {
@@ -141,32 +193,11 @@ func CatchMessage(update tgbotapi.Update) {
 	}
 
 	if chat.Type == "private" {
-		if update.Message.IsCommand() {
-			CatchPrivateCommand(update)
-		} else {
-			group := DB.GetGroup(update)
-			if group == -1 {
-				bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.")
-			} else {
-				forwardToGroup(update, int64(group))
-			}
-		}
+		CatchPrivateMessage(update)
 	}
 
 	if chat.Type == "group" || chat.Type == "supergroup" {
-		if update.Message.NewChatMembers != nil {
-			for _, member := range *update.Message.NewChatMembers {
-				if member.ID == bot.Bot.Self.ID {
-					addInNewGroup(update)
-				}
-			}
-		}
-
-		if update.Message.IsCommand() {
-			CatchGroupCommand(update)
-		} else {
-
-		}
+		CatchGroupMessage(update)
 	}
 }
 

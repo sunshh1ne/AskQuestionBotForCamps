@@ -172,3 +172,23 @@ func (DB *DataBaseSites) AddQuestion(update tgbotapi.Update, reply tgbotapi.Mess
 		log.Println(err)
 	}
 }
+
+func (DB *DataBaseSites) GetUserChatIdByAdminChatId(msg tgbotapi.Message) (int, bool) {
+	adminID := msg.MessageID
+	var userID int
+	err := DB.DB.QueryRow("SELECT user_id FROM not_answered_questions WHERE admin_chat_id = ?", adminID).Scan(&userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, false
+		}
+		log.Println(err)
+	}
+	return userID, true
+}
+
+func (DB *DataBaseSites) DelQuestion(msg tgbotapi.Message) {
+	_, err := DB.DB.Exec("DELETE FROM not_answered_questions WHERE admin_chat_id = ?", msg.MessageID)
+	if err != nil {
+		log.Println(err)
+	}
+}
