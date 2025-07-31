@@ -45,9 +45,10 @@ func createTables(db *sql.DB) {
     		password TEXT
     	);`,
 		`CREATE TABLE IF NOT EXISTS not_answered_questions (
-			user_id       INTEGER,
-			admin_chat_id INTEGER,
-			user_chat_id  INTEGER
+			user_id      INTEGER,
+			admin_msg_id INTEGER,
+			user_msg_id  INTEGER,
+			user_chat_id
 		);`,
 	}
 
@@ -153,8 +154,7 @@ func (DB *DataBaseSites) AddInGroup(update tgbotapi.Update, newGroup int) {
 	}
 }
 
-func (DB *DataBaseSites) GetGroup(update tgbotapi.Update) int {
-	userID := update.Message.Chat.ID
+func (DB *DataBaseSites) GetGroup(userID int64) int {
 	var group int
 	err := DB.DB.QueryRow("SELECT user_group FROM users WHERE user_id = ?", userID).Scan(&group)
 	if err != nil {
@@ -166,8 +166,8 @@ func (DB *DataBaseSites) GetGroup(update tgbotapi.Update) int {
 func (DB *DataBaseSites) AddQuestion(update tgbotapi.Update, reply tgbotapi.Message) {
 	//	update - сообщение которое бот получил
 	//	reply - сообщение которое бот переслал в чат (копия, ответ на которую мы ждем)
-	_, err := DB.DB.Exec("INSERT INTO not_answered_questions(user_id, admin_chat_id, user_chat_id) VALUES (?, ?, ?);",
-		update.Message.From.ID, reply.MessageID, update.Message.MessageID)
+	_, err := DB.DB.Exec("INSERT INTO not_answered_questions(user_id, admin_msg_id, user_msg_id, user_chat_id) VALUES (?, ?, ?, ?);",
+		update.Message.From.ID, reply.MessageID, update.Message.MessageID, update.Message.Chat.ID)
 	if err != nil {
 		log.Println(err)
 	}
@@ -176,7 +176,7 @@ func (DB *DataBaseSites) AddQuestion(update tgbotapi.Update, reply tgbotapi.Mess
 func (DB *DataBaseSites) GetUserChatIdByAdminChatId(msg tgbotapi.Message) (int, bool) {
 	adminID := msg.MessageID
 	var userID int
-	err := DB.DB.QueryRow("SELECT user_id FROM not_answered_questions WHERE admin_chat_id = ?", adminID).Scan(&userID)
+	err := DB.DB.QueryRow("SELECT user_id FROM not_answered_questions WHERE admin_msg_id = ?", adminID).Scan(&userID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return 0, false
@@ -187,7 +187,39 @@ func (DB *DataBaseSites) GetUserChatIdByAdminChatId(msg tgbotapi.Message) (int, 
 }
 
 func (DB *DataBaseSites) DelQuestion(msg tgbotapi.Message) {
-	_, err := DB.DB.Exec("DELETE FROM not_answered_questions WHERE admin_chat_id = ?", msg.MessageID)
+	_, err := DB.DB.Exec("DELETE FROM not_answered_questions WHERE admin_msg_id = ?", msg.MessageID)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func (DB *DataBaseSites) GetQuestions(cnt int) ([]int64, []int, []int, []int64) {
+	rows, err := DB.DB.Query("SELECT * FROM not_answered_questions LIMIT ?", cnt)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rows.Close()
+
+	var user_ids, user_chat_ids []int64
+	var user_msg_ids, admin_msg_ids []int
+	for rows.Next() {
+		var user_msg_id, admin_msg_id int
+		var user_id, user_chat_id int64
+		err := rows.Scan(&user_id, &admin_msg_id, &user_msg_id, &user_chat_id)
+		if err != nil {
+			log.Println(err)
+		}
+		user_msg_ids = append(user_msg_ids, user_msg_id)
+		admin_msg_ids = append(admin_msg_ids, admin_msg_id)
+		user_chat_ids = append(user_chat_ids, user_chat_id)
+		user_ids = append(user_ids, user_id)
+	}
+	return user_ids, admin_msg_ids, user_msg_ids, user_chat_ids
+}
+
+func (DB *DataBaseSites) SetNewAdminChatId(nmsg tgbotapi.Message, oldid int) {
+	nID := nmsg.MessageID
+	_, err := DB.DB.Exec("UPDATE not_answered_questions SET admin_msg_id = ? WHERE admin_msg_id = ?", nID, oldid)
 	if err != nil {
 		log.Println(err)
 	}

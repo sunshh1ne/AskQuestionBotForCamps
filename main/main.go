@@ -77,14 +77,26 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 }
 
 func CatchGroupCommand(update tgbotapi.Update) {
+	if !DB.IsAdmin(update.Message.From) {
+		bot.SendMessage(int(update.Message.Chat.ID), "God Damn!")
+		detectYoungHacker(update)
+		return
+	}
 	command := update.Message.Command()
 	switch command {
 	case "getlink":
-		if DB.IsAdmin(update.Message.From) {
-			bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update))
-		} else {
-			bot.SendMessage(int(update.Message.Chat.ID), "Спички детям не игрушка!")
-			detectYoungHacker(update)
+		bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update))
+	case "getquestions":
+		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids := DB.GetQuestions(cfg.CountOfQuestions)
+		for i := 0; i < len(user_chat_ids); i++ {
+			user_msg_id := user_msg_ids[i]
+			admin_msg_id := admin_msg_ids[i]
+			user_chat_id := user_chat_ids[i]
+			user_id := user_ids[i]
+			//Допилить нормальный(красивый) вывод сообщения
+			sent, err := bot.Bot.Send(tgbotapi.NewForward(int64(DB.GetGroup(user_id)), user_chat_id, user_msg_id))
+			catchError(err)
+			DB.SetNewAdminChatId(sent, admin_msg_id)
 		}
 	}
 }
@@ -96,23 +108,13 @@ func getLinkForUsers(update tgbotapi.Update) string {
 }
 
 func addInNewGroup(update tgbotapi.Update) {
-	if !DB.IsAdmin(update.Message.From) {
-		detectYoungHacker(update)
-		_, err := bot.Bot.LeaveChat(tgbotapi.ChatConfig{
-			ChatID: update.Message.Chat.ID,
-		})
-		catchError(err)
-		return
-	}
 	DB.NewChat(update)
 }
 
 func forwardToGroup(update tgbotapi.Update, group int64) {
 	msg := update.Message
 	sent, err := bot.Bot.Send(tgbotapi.NewForward(group, msg.Chat.ID, msg.MessageID))
-	if err != nil {
-		log.Printf("Ошибка пересылки: %v", err)
-	}
+	catchError(err)
 	DB.AddQuestion(update, sent)
 }
 
@@ -125,11 +127,8 @@ func replyAdmin(update tgbotapi.Update) {
 		return
 	}
 
-	log.Println(userChatID)
 	_, err := bot.Bot.Send(tgbotapi.NewForward(int64(userChatID), update.Message.Chat.ID, update.Message.MessageID))
-	if err != nil {
-		log.Println(err)
-	}
+	catchError(err)
 
 	DB.DelQuestion(*repliedMsg)
 }
@@ -138,7 +137,7 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 	if update.Message.IsCommand() {
 		CatchPrivateCommand(update)
 	} else {
-		group := DB.GetGroup(update)
+		group := DB.GetGroup(update.Message.Chat.ID)
 		if group == -1 {
 			bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.")
 		} else {
@@ -148,7 +147,13 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 }
 
 func CatchGroupMessage(update tgbotapi.Update) {
+	//в группе ботом могут пользоваться только админы
 	if !DB.IsAdmin(update.Message.From) {
+		detectYoungHacker(update)
+		_, err := bot.Bot.LeaveChat(tgbotapi.ChatConfig{
+			ChatID: update.Message.Chat.ID,
+		})
+		catchError(err)
 		detectYoungHacker(update)
 		return
 	}
@@ -201,6 +206,10 @@ func CatchMessage(update tgbotapi.Update) {
 	}
 }
 
+func CatchCallbackQuery(update tgbotapi.Update) {
+
+}
+
 func main() {
 	cfg = config.LoadConfig("D:\\moscowsbornaya\\config.json")
 	DB.Init()
@@ -219,8 +228,8 @@ func main() {
 	for update := range updates {
 		if update.Message != nil {
 			CatchMessage(update)
-		} else {
-
+		} else if update.CallbackQuery != nil {
+			CatchCallbackQuery(update)
 		}
 	}
 }
