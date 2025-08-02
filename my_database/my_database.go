@@ -195,8 +195,13 @@ func (DB *DataBaseSites) DelQuestion(msg tgbotapi.Message) {
 	}
 }
 
-func (DB *DataBaseSites) GetQuestions(cnt int) ([]int64, []int, []int, []int64) {
-	rows, err := DB.DB.Query("SELECT * FROM not_answered_questions LIMIT ?", cnt)
+func (DB *DataBaseSites) GetQuestions(cnt int) ([]int64, []int, []int, []int64, []string) {
+	rows, err := DB.DB.Query(`
+        SELECT q.user_id, q.admin_msg_id, q.user_msg_id, q.user_chat_id, 
+               COALESCE(u.user_name || ' ' || u.user_surname, 'Аноним') as user_name
+        FROM not_answered_questions q
+        LEFT JOIN users u ON q.user_id = u.user_id
+        LIMIT ?`, cnt)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -204,10 +209,12 @@ func (DB *DataBaseSites) GetQuestions(cnt int) ([]int64, []int, []int, []int64) 
 
 	var user_ids, user_chat_ids []int64
 	var user_msg_ids, admin_msg_ids []int
+	var user_names []string
 	for rows.Next() {
 		var user_msg_id, admin_msg_id int
 		var user_id, user_chat_id int64
-		err := rows.Scan(&user_id, &admin_msg_id, &user_msg_id, &user_chat_id)
+		var user_name string
+		err := rows.Scan(&user_id, &admin_msg_id, &user_msg_id, &user_chat_id, &user_name)
 		if err != nil {
 			log.Println(err)
 		}
@@ -215,8 +222,9 @@ func (DB *DataBaseSites) GetQuestions(cnt int) ([]int64, []int, []int, []int64) 
 		admin_msg_ids = append(admin_msg_ids, admin_msg_id)
 		user_chat_ids = append(user_chat_ids, user_chat_id)
 		user_ids = append(user_ids, user_id)
+		user_names = append(user_names, user_name)
 	}
-	return user_ids, admin_msg_ids, user_msg_ids, user_chat_ids
+	return user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names
 }
 
 func (DB *DataBaseSites) SetNewAdminChatId(nmsg tgbotapi.Message, oldid int) {

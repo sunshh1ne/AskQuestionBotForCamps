@@ -137,26 +137,48 @@ func CatchGroupCommand(update tgbotapi.Update) {
 	case "getlink":
 		bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update))
 	case "getquestions":
-		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids := DB.GetQuestions(cfg.CountOfQuestions)
+		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names := DB.GetQuestions(cfg.CountOfQuestions)
 		if len(user_chat_ids) == 0 {
 			bot.SendMessage(int(update.Message.Chat.ID), "Список неотвеченных вопросов пуст")
-		} else {
-			bot.SendMessage(int(update.Message.Chat.ID), fmt.Sprintf("📬 Неотвеченные вопросы (%d):", len(user_chat_ids)))
+			return
 		}
+		headerMsg := tgbotapi.NewMessage(update.Message.Chat.ID,
+			fmt.Sprintf("📬 *Неотвеченные вопросы (%d):*", len(user_chat_ids)))
+		headerMsg.ParseMode = "Markdown"
+		_, err := bot.Bot.Send(headerMsg)
+		catchError(err)
+
 		for i := 0; i < len(user_chat_ids); i++ {
-			user_msg_id := user_msg_ids[i]
-			admin_msg_id := admin_msg_ids[i]
-			user_chat_id := user_chat_ids[i]
-			user_id := user_ids[i]
-			//Допилить нормальный(красивый) вывод сообщения
-			sent, err := bot.Bot.Send(tgbotapi.NewForward(int64(DB.GetGroup(user_id)), user_chat_id, user_msg_id))
+			infoMsg := tgbotapi.NewMessage(
+				update.Message.Chat.ID,
+				fmt.Sprintf("❓ *Вопрос от:* %s\n👤 *ID пользователя:* %d",
+					user_names[i], user_ids[i]),
+			)
+			infoMsg.ParseMode = "Markdown"
+			_, err := bot.Bot.Send(infoMsg)
 			catchError(err)
-			DB.SetNewAdminChatId(sent, admin_msg_id)
+
+			sent, err := bot.Bot.Send(tgbotapi.NewForward(
+				int64(DB.GetGroup(user_ids[i])),
+				user_chat_ids[i],
+				user_msg_ids[i],
+			))
+			catchError(err)
+			DB.SetNewAdminChatId(sent, admin_msg_ids[i])
+
+			if i+1 < len(user_chat_ids) {
+				_, err := bot.Bot.Send(tgbotapi.NewMessage(
+					update.Message.Chat.ID,
+					"────────────────",
+				))
+				catchError(err)
+			}
 		}
 	}
 }
 
 func getLinkForUsers(update tgbotapi.Update) string {
+
 	keyword := DB.GetKeyword(update)
 	url := "https://t.me/MoscowProgrammingTeam_bot?start=" + keyword
 	return url
