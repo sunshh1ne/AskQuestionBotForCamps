@@ -36,10 +36,12 @@ func createTables(db *sql.DB) {
     		key     TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS users (
-   			 user_id    INTEGER PRIMARY KEY
-                       			UNIQUE
-                       			NOT NULL,
-    		user_group INTEGER
+			user_id      INTEGER PRIMARY KEY
+								 UNIQUE
+								 NOT NULL,
+			user_group   INTEGER,
+			user_name    TEXT,
+			user_surname TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS passwords (
     		password TEXT
@@ -223,4 +225,20 @@ func (DB *DataBaseSites) SetNewAdminChatId(nmsg tgbotapi.Message, oldid int) {
 	if err != nil {
 		log.Println(err)
 	}
+}
+
+func (DB *DataBaseSites) SaveUserName(userID int64, name, surname string) error {
+	_, err := DB.DB.Exec(`
+        UPDATE users 
+        SET user_name = ?, user_surname = ?
+        WHERE user_id = ?`,
+		name, surname, userID,
+	)
+	return err
+}
+
+func (DB *DataBaseSites) HasName(userID int64) bool {
+	var name string
+	err := DB.DB.QueryRow("SELECT user_name FROM users WHERE user_id = ?", userID).Scan(&name)
+	return err == nil && name != ""
 }

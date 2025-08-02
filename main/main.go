@@ -3,10 +3,12 @@ package main
 import (
 	"config"
 	"database/sql"
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"my_database"
+	"strings"
 	"sync"
 	"tgbot"
 )
@@ -52,28 +54,76 @@ func groupByLink(update tgbotapi.Update) int {
 	return group
 }
 
+func needsNameRegistration(userID int) bool {
+	var name, surname string
+	err := DB.DB.QueryRow(
+		"SELECT user_name, user_surname FROM users WHERE user_id = ?",
+		userID,
+	).Scan(&name, &surname)
+
+	return err != nil || name == "" || surname == ""
+}
+
+func askForName(chatID int64) {
+	msg := tgbotapi.NewMessage(chatID, `📝 *Введите ваше имя и фамилию через /s:*
+Пример:
+/s _Иван Иванов_
+/s _Анна Петрова_`)
+	msg.ParseMode = "Markdown"
+
+	_, err := bot.Bot.Send(msg)
+	catchError(err)
+}
+
+func handleName(update tgbotapi.Update) {
+	chatID := update.Message.Chat.ID
+	text := update.Message.CommandArguments()
+	parts := strings.SplitN(strings.TrimSpace(text), " ", 2)
+	if len(parts) != 2 {
+		bot.SendMessage(int(chatID), "❌ Неверный формат. Введите Имя и Фамилию через пробел")
+		askForName(chatID)
+		return
+	}
+	if err := DB.SaveUserName(int64(update.Message.From.ID), parts[0], parts[1]); err != nil {
+		bot.SendMessage(int(chatID), "⚠️ Ошибка сохранения. Попробуйте позже.")
+		return
+	}
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Спасибо, %s %s!", parts[0], parts[1]))
+	_, err := bot.Bot.Send(msg)
+	catchError(err)
+}
+
 func CatchPrivateCommand(update tgbotapi.Update) {
 	command := update.Message.Command()
 	switch command {
 	case "start":
-		newAdmin := adminByLink(update)
-		if newAdmin {
-			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы получили права администратора.")
-		}
 		grouplink := groupByLink(update)
 		if grouplink != -1 {
 			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы записаны в группу. Чтобы задать вопрос, напишите мне сообщение, я перешлю его преподавателям")
+		}
+		newAdmin := adminByLink(update)
+		if newAdmin {
+			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы получили права администратора.")
+		} else {
+			if needsNameRegistration(update.Message.From.ID) {
+				askForName(update.Message.Chat.ID)
+			}
 		}
 
 	case "getlink":
 		if DB.IsAdmin(update.Message.From) {
 			bot.SendMessage(update.Message.From.ID, "Ссылка на добавление администратора: "+GetLinkForAdmin())
 		} else {
-			bot.SendMessage(update.Message.From.ID, "Спички детям не игрушка!")
+			bot.SendMessage(update.Message.From.ID, "Okak!")
 			detectYoungHacker(update)
 		}
-	}
 
+	case "changename":
+		askForName(update.Message.Chat.ID)
+
+	case "s":
+		handleName(update)
+	}
 }
 
 func CatchGroupCommand(update tgbotapi.Update) {
@@ -88,6 +138,11 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update))
 	case "getquestions":
 		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids := DB.GetQuestions(cfg.CountOfQuestions)
+		if len(user_chat_ids) == 0 {
+			bot.SendMessage(int(update.Message.Chat.ID), "Список неотвеченных вопросов пуст")
+		} else {
+			bot.SendMessage(int(update.Message.Chat.ID), fmt.Sprintf("📬 Неотвеченные вопросы (%d):", len(user_chat_ids)))
+		}
 		for i := 0; i < len(user_chat_ids); i++ {
 			user_msg_id := user_msg_ids[i]
 			admin_msg_id := admin_msg_ids[i]
@@ -137,6 +192,10 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 	if update.Message.IsCommand() {
 		CatchPrivateCommand(update)
 	} else {
+		if !DB.HasName(update.Message.Chat.ID) {
+			askForName(update.Message.Chat.ID)
+			return
+		}
 		group := DB.GetGroup(update.Message.Chat.ID)
 		if group == -1 {
 			bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.")
@@ -204,6 +263,14 @@ func CatchMessage(update tgbotapi.Update) {
 	if chat.Type == "group" || chat.Type == "supergroup" {
 		CatchGroupMessage(update)
 	}
+}
+
+func CatchGroupCallbackQuery(update tgbotapi.Update) {
+
+}
+
+func CatchPrivateCallbackQuery(update tgbotapi.Update) {
+
 }
 
 func CatchCallbackQuery(update tgbotapi.Update) {
