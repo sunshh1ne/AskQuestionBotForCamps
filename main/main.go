@@ -100,8 +100,7 @@ func handleName(update tgbotapi.Update) {
 
 func CatchPrivateCommand(update tgbotapi.Update) {
 	command := update.Message.Command()
-	switch command {
-	case "start":
+	if command == "start" {
 		grouplink, invitable, wasingroup := groupByLink(update)
 		if grouplink != -1 {
 			if wasingroup {
@@ -120,7 +119,13 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 				askForName(update.Message.From.ID)
 			}
 		}
-
+		return
+	}
+	if DB.IsBanned(update.Message.From.ID, DB.GetGroupByUser(update.Message.From.ID)) {
+		bot.SendMessage(update.Message.From.ID, "❌ Вы заблокированы, обратитесь к преподавателю", false)
+		return
+	}
+	switch command {
 	case "getlink":
 		if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && fl {
 			bot.SendMessage(update.Message.From.ID, "Ссылка на добавление администратора: "+getLinkForAdmin(), false)
@@ -245,7 +250,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 				"❌ Ошибка бана: нельзя забанить администратора", false,
 			)
 		}
-		err = DB.BanUser(userID)
+		err = DB.BanUser(userID, update.Message.Chat.ID)
 		if err != nil {
 			bot.SendMessage(
 				int(update.Message.Chat.ID),
@@ -270,7 +275,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 			)
 			return
 		}
-		err = DB.UnBanUser(userID)
+		err = DB.UnBanUser(userID, update.Message.Chat.ID)
 		if err != nil {
 			bot.SendMessage(
 				int(update.Message.Chat.ID),
@@ -284,19 +289,36 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		}
 
 	case "delbannedq":
-		DB.DeleteQuestionsByBannedUsers()
+		cnt, err := DB.DeleteQuestionsByBannedUsers(update.Message.Chat.ID)
+		if err != nil {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				fmt.Sprintf("❌ Ошибка: Не удалось удалить все сообщения заблокированных пользователей\\. Удалено: %d сообщений"+
+					"Подробнее: "+err.Error(), cnt), false,
+			)
+			return
+		}
 		bot.SendMessage(
 			int(update.Message.Chat.ID),
-			"✅ Успешно удалены вопросы от всех заблокированных пользователей", false,
+			fmt.Sprintf("✅ Успешно удалены сообщения от всех пользователей: %d", cnt), false,
 		)
 
 	case "delq":
 		if update.Message.ReplyToMessage == nil && len(update.Message.CommandArguments()) == 0 {
-			DB.DeleteQuestionsByUsers()
+			cnt, err := DB.DeleteQuestionsByUsers(update.Message.Chat.ID)
+			if err != nil {
+				bot.SendMessage(
+					int(update.Message.Chat.ID),
+					fmt.Sprintf("❌ Ошибка: Не удалось удалить все сообщения пользователей\\. Удалено: %d сообщений"+
+						"Подробнее: "+err.Error(), cnt), false,
+				)
+				return
+			}
 			bot.SendMessage(
 				int(update.Message.Chat.ID),
-				"✅ Успешно удалены вопросы от всех пользователей", false,
+				fmt.Sprintf("✅ Успешно удалены сообщения от всех пользователей: %d", cnt), false,
 			)
+
 		} else {
 			var userID int
 			var err error
@@ -328,6 +350,9 @@ func CatchGroupCommand(update tgbotapi.Update) {
 				fmt.Sprintf("✅ Успешно удалены все вопросы от пользователя `%d` \\(%d вопросов\\) ", userID, cnt), true,
 			)
 		}
+
+	case "ask":
+
 	}
 }
 
@@ -376,23 +401,24 @@ func replyAdmin(update tgbotapi.Update) {
 }
 
 func CatchPrivateMessage(update tgbotapi.Update) {
-	if DB.IsBanned(update.Message.From.ID) {
+	if update.Message.IsCommand() {
+		CatchPrivateCommand(update)
+		return
+	}
+	if DB.IsBanned(update.Message.From.ID, DB.GetGroupByUser(update.Message.From.ID)) {
 		bot.SendMessage(update.Message.From.ID, "❌ Вы заблокированы, обратитесь к преподавателю", false)
 		return
 	}
-	if update.Message.IsCommand() {
-		CatchPrivateCommand(update)
+
+	if !DB.HasName(update.Message.From.ID) {
+		askForName(update.Message.From.ID)
+		return
+	}
+	group := DB.GetGroupByUser(update.Message.From.ID)
+	if group == -1 {
+		bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.", false)
 	} else {
-		if !DB.HasName(update.Message.From.ID) {
-			askForName(update.Message.From.ID)
-			return
-		}
-		group := DB.GetGroupByUser(update.Message.From.ID)
-		if group == -1 {
-			bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.", false)
-		} else {
-			forwardToGroup(update, group)
-		}
+		forwardToGroup(update, group)
 	}
 }
 

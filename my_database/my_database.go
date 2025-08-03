@@ -34,10 +34,6 @@ func createTables(db *sql.DB) {
 			keyword   TEXT,
 			invitable INTEGER DEFAULT (1) 
 		);`,
-		`CREATE TABLE IF NOT EXISTS keys_to_join (
-		    [group] INTEGER,
-    		key     TEXT
-		);`,
 		`CREATE TABLE IF NOT EXISTS users (
 			user_id         INTEGER PRIMARY KEY
 									UNIQUE
@@ -56,10 +52,27 @@ func createTables(db *sql.DB) {
 			admin_msg_id INTEGER,
 			user_msg_id  INTEGER,
 			user_chat_id,
-			group_id     INTEGER
+			user_group     INTEGER
 		);`,
 		`CREATE TABLE IF NOT EXISTS banned (
-			user_id INTEGER
+			user_id INTEGER,
+			user_group INTEGER
+		);`,
+		`CREATE TABLE IF NOT EXISTS questions (
+			user_group     INTEGER,
+			admin_msg_id INTEGER
+		);`,
+		`CREATE TABLE IF NOT EXISTS answers (
+			user_id      INTEGER,
+			user_msg_id  INTEGER,
+			user_group     INTEGER,
+			admin_msg_id INTEGER,
+			answer       TEXT
+		);`,
+		`CREATE TABLE IF NOT EXISTS waiting_for_answer (
+			user_id      INTEGER,
+			admin_msg_id INTEGER,
+			user_group     INTEGER
 		);`,
 	}
 
@@ -202,7 +215,7 @@ func (DB *DataBaseSites) GetGroupByUser(userID int) int64 {
 func (DB *DataBaseSites) AddQuestion(update tgbotapi.Update, reply tgbotapi.Message) {
 	//	update - сообщение которое бот получил
 	//	reply - сообщение которое бот переслал в чат (копия, ответ на которую мы ждем)
-	_, err := DB.DB.Exec("INSERT INTO not_answered_questions(user_id, admin_msg_id, user_msg_id, user_chat_id, group_id) VALUES (?, ?, ?, ?, ?);",
+	_, err := DB.DB.Exec("INSERT INTO not_answered_questions(user_id, admin_msg_id, user_msg_id, user_chat_id, user_group) VALUES (?, ?, ?, ?, ?);",
 		update.Message.From.ID, reply.MessageID, update.Message.MessageID, update.Message.Chat.ID, DB.GetGroupByUser(update.Message.From.ID))
 	if err != nil {
 		log.Println(err)
@@ -251,26 +264,26 @@ func (DB *DataBaseSites) GetQuestions(cnt int, filterGroup int64) ([]int, []int,
 	rows, err := DB.DB.Query(`
         SELECT q.user_id, q.admin_msg_id, q.user_msg_id, q.user_chat_id,
                COALESCE(u.user_name || ' ' || u.user_surname, 'Аноним') as user_name,
-               q.group_id as group_id
+               q.user_group as user_group
         FROM not_answered_questions q
         LEFT JOIN users u ON q.user_id = u.user_id
-        WHERE q.group_id = ?
+        WHERE q.user_group = ?
         LIMIT ?`, filterGroup, cnt)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer rows.Close()
 
-	var user_chat_ids, group_ids []int64
+	var user_chat_ids, user_groups []int64
 	var user_msg_ids, admin_msg_ids, user_ids []int
 	var user_names []string
 
 	for rows.Next() {
 		var user_msg_id, admin_msg_id, user_id int
-		var user_chat_id, group_id int64
+		var user_chat_id, user_group int64
 		var user_name string
 
-		err := rows.Scan(&user_id, &admin_msg_id, &user_msg_id, &user_chat_id, &user_name, &group_id)
+		err := rows.Scan(&user_id, &admin_msg_id, &user_msg_id, &user_chat_id, &user_name, &user_group)
 		if err != nil {
 			log.Println(err)
 			continue
@@ -281,10 +294,10 @@ func (DB *DataBaseSites) GetQuestions(cnt int, filterGroup int64) ([]int, []int,
 		user_chat_ids = append(user_chat_ids, user_chat_id)
 		user_ids = append(user_ids, user_id)
 		user_names = append(user_names, user_name)
-		group_ids = append(group_ids, group_id)
+		user_groups = append(user_groups, user_group)
 	}
 
-	return user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names, group_ids
+	return user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names, user_groups
 }
 
 func (DB *DataBaseSites) SetNewAdminChatId(nmsg tgbotapi.Message, oldid int) {
@@ -328,26 +341,23 @@ func (DB *DataBaseSites) IsInvitable(group int64) bool {
 	return err == nil && (invitable == 1)
 }
 
-func (DB *DataBaseSites) BanUser(userID int) error {
-	_, err := DB.DB.Exec("UPDATE users SET banned = ? WHERE user_id = ?", 1, userID)
+func (DB *DataBaseSites) BanUser(userID int, group int64) error {
+	_, err := DB.DB.Exec("INSERT INTO banned(user_id, user_group) VALUES (?, ?)", userID, group)
 	return err
 }
 
-func (DB *DataBaseSites) UnBanUser(userID int) error {
-	_, err := DB.DB.Exec("UPDATE users SET banned = ? WHERE user_id = ?", 0, userID)
+func (DB *DataBaseSites) UnBanUser(userID int, group int64) error {
+	_, err := DB.DB.Exec("DELETE FROM banned WHERE user_id = ? AND user_group = ?", userID, group)
 	return err
 }
 
-func (DB *DataBaseSites) IsBanned(userID int) bool {
-	var banned int
-	err := DB.DB.QueryRow("SELECT banned FROM users WHERE user_id = ?", userID).Scan(&banned)
+func (DB *DataBaseSites) IsBanned(userID int, group int64) bool {
+	var exists bool
+	err := DB.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM banned WHERE user_id = ? AND user_group = ?)", userID, group).Scan(&exists)
 	if err != nil {
 		log.Println(err)
 	}
-	if banned == 1 {
-		return true
-	}
-	return false
+	return exists
 }
 
 func (DB *DataBaseSites) GetUserIDByMsgIDInAdminChat(msgID int) (int, error) {
@@ -368,10 +378,55 @@ func (DB *DataBaseSites) DeleteQuestionsByUser(userID int) int64 {
 	return ret
 }
 
-func (DB *DataBaseSites) DeleteQuestionsByBannedUsers() int64 {
-	return 0
+func (DB *DataBaseSites) DeleteQuestionsFrom(db string, group int64) (int, error) {
+	tx, err := DB.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	rows, err := tx.Query(fmt.Sprintf("SELECT user_id FROM %s WHERE user_group = %d", db, group))
+	if err != nil {
+		return 0, fmt.Errorf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	cnt := 0
+	for rows.Next() {
+		var userID int
+		if err := rows.Scan(&userID); err != nil {
+			log.Printf("scan error: %v", err)
+			continue
+		}
+
+		res, err := tx.Exec("DELETE FROM not_answered_questions WHERE user_id = ? AND user_group = ?", userID, group)
+		if err != nil {
+			log.Println("delete error for user %d: %v", userID, err)
+			continue
+		}
+		affected, _ := res.RowsAffected()
+		cnt += int(affected)
+	}
+
+	if err = rows.Err(); err != nil {
+		return cnt, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return cnt, err
+	}
+
+	return cnt, nil
 }
 
-func (DB *DataBaseSites) DeleteQuestionsByUsers() int64 {
-	return 0
+func (DB *DataBaseSites) DeleteQuestionsByBannedUsers(group int64) (int, error) {
+	return DB.DeleteQuestionsFrom("banned", group)
+}
+
+func (DB *DataBaseSites) DeleteQuestionsByUsers(group int64) (int, error) {
+	return DB.DeleteQuestionsFrom("users", group)
 }
