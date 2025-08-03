@@ -10,6 +10,7 @@ type Config struct {
 	TGBotKey         string `json:"tgbotkey"`
 	LenOfPass        int    `json:"lenofpass"`
 	CountOfQuestions int    `json:"countofquestions"`
+	QPerMin          int    `json:"questionperminute"`
 }
 
 func LoadConfig(filename string) Config {

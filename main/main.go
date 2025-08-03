@@ -38,20 +38,24 @@ func adminByLink(update tgbotapi.Update) bool {
 	return false
 }
 
-func GetLinkForAdmin() string {
+func getLinkForAdmin() string {
 	pass := DB.GetPassword(cfg.LenOfPass)
 	url := "https://t.me/MoscowProgrammingTeam_bot?start=" + pass
 	return url
 }
 
-func groupByLink(update tgbotapi.Update) int {
+func groupByLink(update tgbotapi.Update) (int64, bool, bool) {
 	text := update.Message.CommandArguments()
 	group := DB.GroupByKeyword(text)
-	if group != -1 {
-		DB.AddInGroup(update, group)
+	invitable := DB.IsInvitable(group)
+	wasingroup := DB.WasInGroup(update, group)
+	if group != -1 && (invitable || wasingroup) {
+		if !wasingroup {
+			DB.AddInGroup(update, group)
+		}
 		//	добавили юзера к группе
 	}
-	return group
+	return group, invitable, wasingroup
 }
 
 func needsNameRegistration(userID int) bool {
@@ -97,9 +101,15 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 	command := update.Message.Command()
 	switch command {
 	case "start":
-		grouplink := groupByLink(update)
+		grouplink, invitable, wasingroup := groupByLink(update)
 		if grouplink != -1 {
-			bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы записаны в группу. Чтобы задать вопрос, напишите мне сообщение, я перешлю его преподавателям")
+			if invitable {
+				bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы записаны в группу. Чтобы задать вопрос, напишите мне сообщение, я перешлю его преподавателям")
+			} else if wasingroup {
+				bot.SendMessage(update.Message.From.ID, "Теперь вы задаете вопросы в группу (другая группа, названия пришпилить надо)")
+			} else {
+				bot.SendMessage(update.Message.From.ID, "К сожалению, запись в данную группу уже закрыта. Сообщите преподавателю об этой проблеме")
+			}
 		}
 		newAdmin := adminByLink(update)
 		if newAdmin {
@@ -112,7 +122,7 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 
 	case "getlink":
 		if DB.IsAdmin(update.Message.From) {
-			bot.SendMessage(update.Message.From.ID, "Ссылка на добавление администратора: "+GetLinkForAdmin())
+			bot.SendMessage(update.Message.From.ID, "Ссылка на добавление администратора: "+getLinkForAdmin())
 		} else {
 			bot.SendMessage(update.Message.From.ID, "Okak!")
 			detectYoungHacker(update)
@@ -136,6 +146,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 	switch command {
 	case "getlink":
 		bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update))
+
 	case "getquestions":
 		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names := DB.GetQuestions(cfg.CountOfQuestions)
 		if len(user_chat_ids) == 0 {
@@ -159,7 +170,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 			catchError(err)
 
 			sent, err := bot.Bot.Send(tgbotapi.NewForward(
-				int64(DB.GetGroup(user_ids[i])),
+				int64(DB.GetGroupByUser(user_ids[i])),
 				user_chat_ids[i],
 				user_msg_ids[i],
 			))
@@ -174,6 +185,14 @@ func CatchGroupCommand(update tgbotapi.Update) {
 				catchError(err)
 			}
 		}
+
+	case "stoplink":
+		DB.StopGroupLink(update.Message.Chat.ID)
+		bot.SendMessage(int(update.Message.Chat.ID), "Запись в группу приостановлена.")
+
+	case "contlink":
+		DB.ContinueGroupLink(update.Message.Chat.ID)
+		bot.SendMessage(int(update.Message.Chat.ID), "Запись в группу восстановлена.")
 	}
 }
 
@@ -218,7 +237,7 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 			askForName(update.Message.Chat.ID)
 			return
 		}
-		group := DB.GetGroup(update.Message.Chat.ID)
+		group := DB.GetGroupByUser(update.Message.Chat.ID)
 		if group == -1 {
 			bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.")
 		} else {

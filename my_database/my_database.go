@@ -7,6 +7,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"random"
+	"strconv"
+	"strings"
 )
 
 type DataBaseSites struct {
@@ -28,20 +30,22 @@ func createTables(db *sql.DB) {
     		user_id INTEGER PRIMARY KEY
 		);`,
 		`CREATE TABLE IF NOT EXISTS chats (
-    		chat_id INTEGER PRIMARY KEY,
-    		keyword TEXT
+			chat_id   INTEGER PRIMARY KEY,
+			keyword   TEXT,
+			invitable INTEGER DEFAULT (1) 
 		);`,
 		`CREATE TABLE IF NOT EXISTS keys_to_join (
 		    [group] INTEGER,
     		key     TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS users (
-			user_id      INTEGER PRIMARY KEY
-								 UNIQUE
-								 NOT NULL,
-			user_group   INTEGER,
-			user_name    TEXT,
-			user_surname TEXT
+			user_id         INTEGER PRIMARY KEY
+									UNIQUE
+									NOT NULL,
+			user_group      INTEGER,
+			user_name       TEXT,
+			user_surname    TEXT,
+			user_all_groups TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS passwords (
     		password TEXT
@@ -136,8 +140,8 @@ func (DB *DataBaseSites) GetKeyword(update tgbotapi.Update) string {
 	return keyword
 }
 
-func (DB *DataBaseSites) GroupByKeyword(text string) int {
-	var chatID int
+func (DB *DataBaseSites) GroupByKeyword(text string) int64 {
+	var chatID int64
 	err := DB.DB.QueryRow("SELECT chat_id FROM chats WHERE keyword = ?", text).Scan(&chatID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -148,15 +152,45 @@ func (DB *DataBaseSites) GroupByKeyword(text string) int {
 	return chatID
 }
 
-func (DB *DataBaseSites) AddInGroup(update tgbotapi.Update, newGroup int) {
+func (DB *DataBaseSites) WasInGroup(update tgbotapi.Update, group int64) bool {
+	userID := update.Message.Chat.ID
+	var groups string
+	err := DB.DB.QueryRow("SELECT user_all_groups FROM users WHERE user_id = ?", userID).Scan(&groups)
+	if err != nil {
+		log.Println(err)
+	}
+	parts := strings.Split(strings.TrimSpace(groups), " ")
+	for _, g := range parts {
+		val, err := strconv.ParseInt(g, 10, 64)
+		if err != nil {
+			log.Println(err)
+		}
+		if val == group {
+			return true
+		}
+	}
+	return false
+}
+
+func (DB *DataBaseSites) AddInGroup(update tgbotapi.Update, newGroup int64) {
 	userID := update.Message.Chat.ID
 	_, err := DB.DB.Exec("UPDATE users SET user_group = ? WHERE user_id = ?", newGroup, userID)
 	if err != nil {
 		log.Println(err)
 	}
+	var groups string
+	err = DB.DB.QueryRow("SELECT user_all_groups FROM users WHERE user_id = ?", userID).Scan(&groups)
+	if err != nil {
+		log.Println(err)
+	}
+	groups += " " + strconv.FormatInt(newGroup, 10)
+	_, err = DB.DB.Exec("UPDATE users SET user_all_groups = ? WHERE user_id = ?", groups, userID)
+	if err != nil {
+		log.Println(err)
+	}
 }
 
-func (DB *DataBaseSites) GetGroup(userID int64) int {
+func (DB *DataBaseSites) GetGroupByUser(userID int64) int {
 	var group int
 	err := DB.DB.QueryRow("SELECT user_group FROM users WHERE user_id = ?", userID).Scan(&group)
 	if err != nil {
@@ -249,4 +283,25 @@ func (DB *DataBaseSites) HasName(userID int64) bool {
 	var name string
 	err := DB.DB.QueryRow("SELECT user_name FROM users WHERE user_id = ?", userID).Scan(&name)
 	return err == nil && name != ""
+}
+
+func (DB *DataBaseSites) StopGroupLink(group int64) {
+	_, err := DB.DB.Exec("UPDATE chats SET invitable = ? WHERE chat_id = ?", 0, group)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func (DB *DataBaseSites) ContinueGroupLink(group int64) {
+	_, err := DB.DB.Exec("UPDATE chats SET invitable = ? WHERE chat_id = ?", 1, group)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
+func (DB *DataBaseSites) IsInvitable(group int64) bool {
+	var invitable int
+	err := DB.DB.QueryRow("SELECT invitable FROM chats WHERE chat_id = ?", group).Scan(&invitable)
+	fmt.Println(invitable, group)
+	return err == nil && (invitable == 1)
 }
