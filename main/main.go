@@ -362,9 +362,9 @@ func replyAdmin(update tgbotapi.Update) {
 	}
 	userMsgID, err := DB.GetUserMsgIDByAdminID(repliedMsg.MessageID)
 	catchError(err)
-	bot.SendMessage(
+	bot.SendReplyMessage(
 		userChatID,
-		fmt.Sprintf("✅ Ответ на ваш вопрос с ID `%d`", userMsgID), true,
+		fmt.Sprintf("✅ Ответ на ваш вопрос с ID `%d`", userMsgID), true, userMsgID,
 	)
 	bot.SendForward(int64(userChatID), update.Message.Chat.ID, update.Message.MessageID)
 
