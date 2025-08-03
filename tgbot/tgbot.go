@@ -33,18 +33,22 @@ func RemoveNonUTF8Runes(s string) string {
 	return string(valid)
 }
 
-func (bot *TGBot) SendMessage(id int, message string) tgbotapi.Message {
-	msg, err := bot.Bot.Send(tgbotapi.NewMessage(int64(id), message))
+func (bot *TGBot) SendMessage(id int, message string, isMarkdown bool) tgbotapi.Message {
+	msg := tgbotapi.NewMessage(int64(id), message)
+	if isMarkdown {
+		msg.ParseMode = "MarkdownV2"
+	}
+	sentMsg, err := bot.Bot.Send(msg)
+	if err != nil {
+		log.Println(err)
+	}
+	return sentMsg
+}
+
+func (bot *TGBot) SendForward(id1, id2 int64, id3 int) tgbotapi.Message {
+	msg, err := bot.Bot.Send(tgbotapi.NewForward(id1, id2, id3))
 	if err != nil {
 		log.Println(err)
 	}
 	return msg
-}
-
-func (bot *TGBot) SendForward(id1, id2, id3 int) int {
-	msg, err := bot.Bot.Send(tgbotapi.NewForward(int64(id1), int64(id2), id3))
-	if err != nil {
-		log.Println(err)
-	}
-	return msg.MessageID
 }
