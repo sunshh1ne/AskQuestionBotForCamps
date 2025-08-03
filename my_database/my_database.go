@@ -229,6 +229,24 @@ func (DB *DataBaseSites) DelQuestion(msg tgbotapi.Message) {
 	}
 }
 
+func (DB *DataBaseSites) GetUserMsgIDByAdminID(adminMsgID int) (int, error) {
+	var userMsgID int
+
+	err := DB.DB.QueryRow(`
+        SELECT user_msg_id 
+        FROM not_answered_questions 
+        WHERE admin_msg_id = ?`, adminMsgID).Scan(&userMsgID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("сообщение бота с ID %d не найдено", adminMsgID)
+		}
+		return 0, fmt.Errorf("ошибка при поиске user_msg_id: %v", err)
+	}
+
+	return userMsgID, nil
+}
+
 func (DB *DataBaseSites) GetQuestions(cnt int, filterGroup int64) ([]int, []int, []int, []int64, []string, []int64) {
 	rows, err := DB.DB.Query(`
         SELECT q.user_id, q.admin_msg_id, q.user_msg_id, q.user_chat_id,

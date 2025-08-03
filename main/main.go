@@ -164,7 +164,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 	case "getquestions":
 		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names, group_ids := DB.GetQuestions(cfg.CountOfQuestions, update.Message.Chat.ID)
 		if len(user_chat_ids) == 0 {
-			bot.SendMessage(int(update.Message.Chat.ID), "Список неотвеченных вопросов пуст", false)
+			bot.SendMessage(int(update.Message.Chat.ID), "✅ Список неотвеченных вопросов пуст", false)
 			return
 		}
 		bot.SendMessage(
@@ -346,6 +346,10 @@ func forwardToGroup(update tgbotapi.Update, group int64) {
 	msg := update.Message
 	sent := bot.SendForward(group, msg.Chat.ID, msg.MessageID)
 	DB.AddQuestion(update, sent)
+	bot.SendMessage(
+		int(update.Message.Chat.ID),
+		fmt.Sprintf("✅ Ваш вопрос отправлен предподавателям\\. ID вашего вопроса \\- `%d`", msg.MessageID), true,
+	)
 }
 
 func replyAdmin(update tgbotapi.Update) {
@@ -356,8 +360,18 @@ func replyAdmin(update tgbotapi.Update) {
 		log.Println("Не найдено исходное сообщение пользователя")
 		return
 	}
-
+	userMsgID, err := DB.GetUserMsgIDByAdminID(repliedMsg.MessageID)
+	catchError(err)
+	bot.SendMessage(
+		userChatID,
+		fmt.Sprintf("✅ Ответ на ваш вопрос с ID `%d`", userMsgID), true,
+	)
 	bot.SendForward(int64(userChatID), update.Message.Chat.ID, update.Message.MessageID)
+
+	bot.SendReplyMessage(
+		int(update.Message.Chat.ID),
+		fmt.Sprintf("✅ Ваш ответ отправлен пользователю с ID \\- `%d`", userChatID), true, update.Message.MessageID,
+	)
 	DB.DelQuestion(*repliedMsg)
 }
 

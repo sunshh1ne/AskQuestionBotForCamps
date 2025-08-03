@@ -45,6 +45,19 @@ func (bot *TGBot) SendMessage(id int, message string, isMarkdown bool) tgbotapi.
 	return sentMsg
 }
 
+func (bot *TGBot) SendReplyMessage(id int, message string, isMarkdown bool, replyID int) tgbotapi.Message {
+	msg := tgbotapi.NewMessage(int64(id), message)
+	if isMarkdown {
+		msg.ParseMode = "MarkdownV2"
+	}
+	msg.ReplyToMessageID = replyID
+	sentMsg, err := bot.Bot.Send(msg)
+	if err != nil {
+		log.Println(err)
+	}
+	return sentMsg
+}
+
 func (bot *TGBot) SendForward(id1, id2 int64, id3 int) tgbotapi.Message {
 	msg, err := bot.Bot.Send(tgbotapi.NewForward(id1, id2, id3))
 	if err != nil {
