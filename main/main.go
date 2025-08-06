@@ -121,7 +121,7 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 		}
 		return
 	}
-	if DB.IsBanned(update.Message.From.ID, DB.GetGroupByUser(update.Message.From.ID)) {
+	if DB.IsBanned(update.Message.From.ID, DB.GetGroupByUserID(update.Message.From.ID)) {
 		bot.SendMessage(update.Message.From.ID, "❌ Вы заблокированы, обратитесь к преподавателю", false)
 		return
 	}
@@ -155,6 +155,14 @@ func getUserIDByMsg(update tgbotapi.Update) (int, error) {
 	return userID, err
 }
 
+func printHeadOfQuestion(chatID int, user_name string, user_id int) {
+	bot.SendMessage(
+		chatID,
+		fmt.Sprintf("❓ *Вопрос от:* %s\n👤 *ID пользователя:* `%d`",
+			user_name, user_id), true,
+	)
+}
+
 func CatchGroupCommand(update tgbotapi.Update) {
 	if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
 		bot.SendMessage(int(update.Message.Chat.ID), "God Damn!", false)
@@ -167,7 +175,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update), false)
 
 	case "getquestions":
-		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names, group_ids := DB.GetQuestions(cfg.CountOfQuestions, update.Message.Chat.ID)
+		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names, group_ids := DB.GetQuestionsFromUsers(cfg.CountOfQuestions, update.Message.Chat.ID)
 		if len(user_chat_ids) == 0 {
 			bot.SendMessage(int(update.Message.Chat.ID), "✅ Список неотвеченных вопросов пуст", false)
 			return
@@ -178,11 +186,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		)
 
 		for i := 0; i < len(user_chat_ids); i++ {
-			bot.SendMessage(
-				int(update.Message.Chat.ID),
-				fmt.Sprintf("❓ *Вопрос от:* %s\n👤 *ID пользователя:* `%d`",
-					user_names[i], user_ids[i]), true,
-			)
+			printHeadOfQuestion(int(update.Message.Chat.ID), user_names[i], user_ids[i])
 			sent := bot.SendForward(group_ids[i],
 				user_chat_ids[i],
 				user_msg_ids[i])
@@ -289,7 +293,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		}
 
 	case "delbannedq":
-		cnt, err := DB.DeleteQuestionsByBannedUsers(update.Message.Chat.ID)
+		cnt, err := DB.DeleteQuestionsFromBannedUsers(update.Message.Chat.ID)
 		if err != nil {
 			bot.SendMessage(
 				int(update.Message.Chat.ID),
@@ -305,7 +309,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 
 	case "delq":
 		if update.Message.ReplyToMessage == nil && len(update.Message.CommandArguments()) == 0 {
-			cnt, err := DB.DeleteQuestionsByUsers(update.Message.Chat.ID)
+			cnt, err := DB.DeleteQuestionsFromUsers(update.Message.Chat.ID)
 			if err != nil {
 				bot.SendMessage(
 					int(update.Message.Chat.ID),
@@ -344,7 +348,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 					return
 				}
 			}
-			cnt := DB.DeleteQuestionsByUser(userID)
+			cnt := DB.DeleteQuestionsFromUser(userID)
 			bot.SendMessage(
 				int(update.Message.Chat.ID),
 				fmt.Sprintf("✅ Успешно удалены все вопросы от пользователя `%d` \\(%d вопросов\\) ", userID, cnt), true,
@@ -352,7 +356,20 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		}
 
 	case "ask":
-
+		id, err := DB.AddQuestionFromAdmin(update, cfg.MaxlenInPreview)
+		if err != nil {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				"❌ Ошибка: Не удалось добавить вопрос в базу данных. "+
+					"Подробнее: "+err.Error(), false,
+			)
+		} else {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				fmt.Sprintf("✅ Вопрос успешно добавлен в базу данных\\! Его id \\- `%d`",
+					id), true,
+			)
+		}
 	}
 }
 
@@ -364,13 +381,21 @@ func getLinkForUsers(update tgbotapi.Update) string {
 }
 
 func addInNewGroup(update tgbotapi.Update) {
-	DB.NewChat(update)
+	err := DB.NewChat(update)
+	if err != nil {
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			"❌ Ошибка, добавьте бота в группу заново."+
+				"Подробнее: "+err.Error(), false,
+		)
+	}
 }
 
 func forwardToGroup(update tgbotapi.Update, group int64) {
 	msg := update.Message
+	printHeadOfQuestion(int(group), DB.GetName(update.Message.From.ID), update.Message.From.ID)
 	sent := bot.SendForward(group, msg.Chat.ID, msg.MessageID)
-	DB.AddQuestion(update, sent)
+	DB.AddQuestionFromUser(update, sent)
 	bot.SendMessage(
 		int(update.Message.Chat.ID),
 		fmt.Sprintf("✅ Ваш вопрос отправлен предподавателям\\. ID вашего вопроса \\- `%d`", msg.MessageID), true,
@@ -397,7 +422,7 @@ func replyAdmin(update tgbotapi.Update) {
 		int(update.Message.Chat.ID),
 		fmt.Sprintf("✅ Ваш ответ отправлен пользователю с ID \\- `%d`", userChatID), true, update.Message.MessageID,
 	)
-	DB.DelQuestion(*repliedMsg)
+	DB.DelQuestionFromUser(*repliedMsg)
 }
 
 func CatchPrivateMessage(update tgbotapi.Update) {
@@ -405,16 +430,15 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 		CatchPrivateCommand(update)
 		return
 	}
-	if DB.IsBanned(update.Message.From.ID, DB.GetGroupByUser(update.Message.From.ID)) {
+	group := DB.GetGroupByUserID(update.Message.From.ID)
+	if DB.IsBanned(update.Message.From.ID, group) {
 		bot.SendMessage(update.Message.From.ID, "❌ Вы заблокированы, обратитесь к преподавателю", false)
 		return
 	}
-
 	if !DB.HasName(update.Message.From.ID) {
 		askForName(update.Message.From.ID)
 		return
 	}
-	group := DB.GetGroupByUser(update.Message.From.ID)
 	if group == -1 {
 		bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.", false)
 	} else {

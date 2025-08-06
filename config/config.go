@@ -11,6 +11,7 @@ type Config struct {
 	LenOfPass        int    `json:"lenofpass"`
 	CountOfQuestions int    `json:"countofquestions"`
 	QPerMin          int    `json:"questionperminute"`
+	MaxlenInPreview  int    `json:"maxleninpreview"`
 }
 
 func LoadConfig(filename string) Config {

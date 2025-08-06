@@ -6,6 +6,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	_ "github.com/mattn/go-sqlite3"
 	"log"
+	"math"
 	"random"
 	"strconv"
 	"strings"
@@ -57,22 +58,6 @@ func createTables(db *sql.DB) {
 		`CREATE TABLE IF NOT EXISTS banned (
 			user_id INTEGER,
 			user_group INTEGER
-		);`,
-		`CREATE TABLE IF NOT EXISTS questions (
-			user_group     INTEGER,
-			admin_msg_id INTEGER
-		);`,
-		`CREATE TABLE IF NOT EXISTS answers (
-			user_id      INTEGER,
-			user_msg_id  INTEGER,
-			user_group     INTEGER,
-			admin_msg_id INTEGER,
-			answer       TEXT
-		);`,
-		`CREATE TABLE IF NOT EXISTS waiting_for_answer (
-			user_id      INTEGER,
-			admin_msg_id INTEGER,
-			user_group     INTEGER
 		);`,
 	}
 
@@ -133,12 +118,53 @@ func (DB *DataBaseSites) GetPassword(len int) string {
 	return password
 }
 
-func (DB *DataBaseSites) NewChat(update tgbotapi.Update) {
-	keyword := random.GetRandom(20)
-	_, err := DB.DB.Exec("INSERT INTO chats(chat_id, keyword) VALUES (?, ?);", update.Message.Chat.ID, keyword)
+func (DB *DataBaseSites) NewChat(update tgbotapi.Update) error {
+	tx, err := DB.DB.Begin()
 	if err != nil {
-		log.Println(err)
+		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
+
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	keyword := random.GetRandom(20)
+	_, err = tx.Exec("INSERT INTO chats(chat_id, keyword) VALUES (?, ?)",
+		update.Message.Chat.ID, keyword)
+	if err != nil {
+		return fmt.Errorf("failed to insert chat: %v", err)
+	}
+
+	tableName := fmt.Sprintf("questions_%d", int64(math.Abs(float64(update.Message.Chat.ID))))
+	_, err = tx.Exec(fmt.Sprintf(`
+        CREATE TABLE IF NOT EXISTS %s (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_msg_id INTEGER NOT NULL,
+            question_text TEXT NOT NULL
+        )`, tableName))
+	if err != nil {
+		return fmt.Errorf("failed to create questions table: %v", err)
+	}
+
+	tableName = fmt.Sprintf("answers_%d", int64(math.Abs(float64(update.Message.Chat.ID))))
+	_, err = tx.Exec(fmt.Sprintf(`
+        CREATE TABLE IF NOT EXISTS %s (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            user_msg_id INTEGER NOT NULL,
+            answer_text TEXT NOT NULL
+        )`, tableName))
+	if err != nil {
+		return fmt.Errorf("failed to create answers table: %v", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return nil
 }
 
 func (DB *DataBaseSites) GetKeyword(update tgbotapi.Update) string {
@@ -203,7 +229,7 @@ func (DB *DataBaseSites) AddInGroup(update tgbotapi.Update, newGroup int64, wasI
 	}
 }
 
-func (DB *DataBaseSites) GetGroupByUser(userID int) int64 {
+func (DB *DataBaseSites) GetGroupByUserID(userID int) int64 {
 	var group int64
 	err := DB.DB.QueryRow("SELECT user_group FROM users WHERE user_id = ?", userID).Scan(&group)
 	if err != nil {
@@ -212,11 +238,11 @@ func (DB *DataBaseSites) GetGroupByUser(userID int) int64 {
 	return group
 }
 
-func (DB *DataBaseSites) AddQuestion(update tgbotapi.Update, reply tgbotapi.Message) {
+func (DB *DataBaseSites) AddQuestionFromUser(update tgbotapi.Update, reply tgbotapi.Message) {
 	//	update - сообщение которое бот получил
 	//	reply - сообщение которое бот переслал в чат (копия, ответ на которую мы ждем)
 	_, err := DB.DB.Exec("INSERT INTO not_answered_questions(user_id, admin_msg_id, user_msg_id, user_chat_id, user_group) VALUES (?, ?, ?, ?, ?);",
-		update.Message.From.ID, reply.MessageID, update.Message.MessageID, update.Message.Chat.ID, DB.GetGroupByUser(update.Message.From.ID))
+		update.Message.From.ID, reply.MessageID, update.Message.MessageID, update.Message.Chat.ID, DB.GetGroupByUserID(update.Message.From.ID))
 	if err != nil {
 		log.Println(err)
 	}
@@ -235,7 +261,7 @@ func (DB *DataBaseSites) GetUserChatIdByAdminChatId(msg tgbotapi.Message) (int, 
 	return userID, true
 }
 
-func (DB *DataBaseSites) DelQuestion(msg tgbotapi.Message) {
+func (DB *DataBaseSites) DelQuestionFromUser(msg tgbotapi.Message) {
 	_, err := DB.DB.Exec("DELETE FROM not_answered_questions WHERE admin_msg_id = ?", msg.MessageID)
 	if err != nil {
 		log.Println(err)
@@ -260,7 +286,7 @@ func (DB *DataBaseSites) GetUserMsgIDByAdminID(adminMsgID int) (int, error) {
 	return userMsgID, nil
 }
 
-func (DB *DataBaseSites) GetQuestions(cnt int, filterGroup int64) ([]int, []int, []int, []int64, []string, []int64) {
+func (DB *DataBaseSites) GetQuestionsFromUsers(cnt int, filterGroup int64) ([]int, []int, []int, []int64, []string, []int64) {
 	rows, err := DB.DB.Query(`
         SELECT q.user_id, q.admin_msg_id, q.user_msg_id, q.user_chat_id,
                COALESCE(u.user_name || ' ' || u.user_surname, 'Аноним') as user_name,
@@ -324,6 +350,15 @@ func (DB *DataBaseSites) HasName(userID int) bool {
 	return err == nil && name != ""
 }
 
+func (DB *DataBaseSites) GetName(userID int) string {
+	var name, surname string
+	err := DB.DB.QueryRow("SELECT user_name, user_surname FROM users WHERE user_id = ?", userID).Scan(&name, &surname)
+	if err != nil {
+		log.Println(err)
+	}
+	return name + " " + surname
+}
+
 func (DB *DataBaseSites) StopGroupLink(group int64) error {
 	_, err := DB.DB.Exec("UPDATE chats SET invitable = ? WHERE chat_id = ?", 0, group)
 	return err
@@ -366,7 +401,7 @@ func (DB *DataBaseSites) GetUserIDByMsgIDInAdminChat(msgID int) (int, error) {
 	return userID, err
 }
 
-func (DB *DataBaseSites) DeleteQuestionsByUser(userID int) int64 {
+func (DB *DataBaseSites) DeleteQuestionsFromUser(userID int) int64 {
 	result, err := DB.DB.Exec("DELETE FROM not_answered_questions WHERE user_id = ?", userID)
 	if err != nil {
 		log.Println(err)
@@ -378,7 +413,7 @@ func (DB *DataBaseSites) DeleteQuestionsByUser(userID int) int64 {
 	return ret
 }
 
-func (DB *DataBaseSites) DeleteQuestionsFrom(db string, group int64) (int, error) {
+func (DB *DataBaseSites) DeleteQuestionsByUsers(db string, group int64) (int, error) {
 	tx, err := DB.DB.Begin()
 	if err != nil {
 		return 0, err
@@ -423,10 +458,36 @@ func (DB *DataBaseSites) DeleteQuestionsFrom(db string, group int64) (int, error
 	return cnt, nil
 }
 
-func (DB *DataBaseSites) DeleteQuestionsByBannedUsers(group int64) (int, error) {
-	return DB.DeleteQuestionsFrom("banned", group)
+func (DB *DataBaseSites) DeleteQuestionsFromBannedUsers(group int64) (int, error) {
+	return DB.DeleteQuestionsByUsers("banned", group)
 }
 
-func (DB *DataBaseSites) DeleteQuestionsByUsers(group int64) (int, error) {
-	return DB.DeleteQuestionsFrom("users", group)
+func (DB *DataBaseSites) DeleteQuestionsFromUsers(group int64) (int, error) {
+	return DB.DeleteQuestionsByUsers("users", group)
+}
+
+func (DB *DataBaseSites) AddQuestionFromAdmin(update tgbotapi.Update, maxLen int) (int64, error) {
+	text := update.Message.CommandArguments()
+	if len(text) > maxLen {
+		text = text[:maxLen]
+	}
+
+	chatID := int64(math.Abs(float64(update.Message.Chat.ID)))
+	adminMsgID := update.Message.MessageID
+	tableName := fmt.Sprintf("questions_%d", chatID)
+
+	result, err := DB.DB.Exec(fmt.Sprintf(`
+        INSERT INTO %s (admin_msg_id, question_text)
+        VALUES (?, ?)`, tableName),
+		adminMsgID, text)
+	if err != nil {
+		return 0, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get last insert ID: %v", err)
+	}
+
+	return id, nil
 }
