@@ -600,3 +600,57 @@ func (DB *DataBaseSites) GetAdminQuestionID(adminMsgID int, groupID int64) (int,
 
 	return questionID, nil
 }
+
+func (DB *DataBaseSites) DelAdminQuestion(adminMsgID int, groupID int64) error {
+	tx, err := DB.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	questionsTable := fmt.Sprintf("questions_%d", int64(math.Abs(float64(groupID))))
+	answersTable := fmt.Sprintf("answers_%d", int64(math.Abs(float64(groupID))))
+
+	_, err = tx.Exec(fmt.Sprintf(`
+        DELETE FROM %s 
+        WHERE admin_msg_id = ?`, answersTable), adminMsgID)
+	if err != nil {
+		return fmt.Errorf("failed to delete from answers: %v", err)
+	}
+
+	_, err = tx.Exec(fmt.Sprintf(`
+        DELETE FROM %s 
+        WHERE admin_msg_id = ?`, questionsTable), adminMsgID)
+	if err != nil {
+		return fmt.Errorf("failed to delete from questions: %v", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return nil
+}
+
+func (DB *DataBaseSites) DelLastAdminQuestion(groupID int64) error {
+	questionsTable := fmt.Sprintf("questions_%d", int64(math.Abs(float64(groupID))))
+
+	var lastAdminMsgID int
+	err := DB.DB.QueryRow(fmt.Sprintf(`
+        SELECT admin_msg_id FROM %s 
+        ORDER BY id DESC 
+        LIMIT 1`, questionsTable)).Scan(&lastAdminMsgID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("no questions found in group")
+		}
+		return fmt.Errorf("failed to get last question: %v", err)
+	}
+
+	return DB.DelAdminQuestion(lastAdminMsgID, groupID)
+}

@@ -360,6 +360,21 @@ func CatchGroupCommand(update tgbotapi.Update) {
 
 	case "ask":
 		bot.SendMessage(int(update.Message.Chat.ID), askConst, false)
+
+	case "deletelastq":
+		err := DB.DelLastAdminQuestion(update.Message.Chat.ID)
+		if err != nil {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				"❌ Ошибка: Не удалось удалить последний вопрос. "+
+					"Подробнее: "+err.Error(), false,
+			)
+			return
+		}
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			"✅ Успешно удален последний вопрос ", true,
+		)
 	}
 }
 
