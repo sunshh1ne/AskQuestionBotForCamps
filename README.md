@@ -1,1 +1,1 @@
-"# moscow_team_sbory" 
+"# for educational use only" 
