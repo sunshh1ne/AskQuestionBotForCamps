@@ -164,7 +164,7 @@ func printHeadOfQuestion(chatID int, user_name string, user_id int) {
 	)
 }
 
-const askConst = "Ответьте на мое сообщение, полностью сформулировав вопрос и приложив все необходимые файлы. Затем я задам этот вопрос всем пользователям, присоединенным в группу."
+const askConst = "Ответьте на мое сообщение, полностью сформулировав вопрос и приложив все необходимые файлы. Затем я задам этот вопрос всем пользователям, присоединенным к группе."
 
 func CatchGroupCommand(update tgbotapi.Update) {
 	if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
@@ -450,6 +450,76 @@ func CatchReplyGroup(update tgbotapi.Update) {
 	}
 }
 
+func ParseAdminMsgIDFromSendQ(text string) (int, error) {
+	prefix := "📨 Новый вопрос, его ID - "
+	if !strings.HasPrefix(text, prefix) {
+		return 0, fmt.Errorf("invalid message format")
+	}
+
+	idStr := strings.TrimSpace(text[len(prefix):])
+
+	adminMsgID, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid ID format: %v", err)
+	}
+
+	return adminMsgID, nil
+}
+
+func CatchAnswerOnAdminQuestion(update tgbotapi.Update) {
+	repliedMsg := update.Message.ReplyToMessage
+	adminMsgId, err := ParseAdminMsgIDFromSendQ(repliedMsg.Text)
+	fmt.Println(adminMsgId)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	user_group := DB.GetGroupByUserID(update.Message.From.ID)
+	fl, err := DB.IsAdminQuestion(adminMsgId, user_group)
+	fmt.Println(fl)
+	if !fl {
+		return
+	}
+	if err != nil {
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			"❌ Ошибка: Не удалось отправить ответ на вопрос, повторите попытку позже", false,
+		)
+		log.Println(err)
+		return
+	}
+	fl, err = DB.DidUserAnswered(update.Message.From.ID, adminMsgId, user_group)
+	if fl {
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			"❌ Ошибка: Вы уже ответили на этот вопрос", false,
+		)
+		return
+	}
+	if err != nil {
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			"❌ Ошибка: Не удалось отправить ответ на вопрос, повторите попытку позже", false,
+		)
+		log.Println(err)
+		return
+	}
+	userMsgId := update.Message.MessageID
+	err = DB.AddUserAnswerOnAdminQuestion(update.Message.From.ID, userMsgId, adminMsgId, user_group, update.Message.Text)
+	if err != nil {
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			"❌ Ошибка: Не удалось отправить ответ на вопрос, повторите попытку позже", false,
+		)
+		log.Println(err)
+		return
+	}
+	bot.SendMessage(
+		int(update.Message.Chat.ID),
+		fmt.Sprintf("✅ Ваш ответ успешно отправлен\\. Вы ответили на вопрос с ID `%d`", adminMsgId), true,
+	)
+}
+
 func CatchPrivateMessage(update tgbotapi.Update) {
 	if update.Message.IsCommand() {
 		CatchPrivateCommand(update)
@@ -467,7 +537,11 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 	if group == -1 {
 		bot.SendMessage(update.Message.From.ID, "Вы не присоединены к группе. Обратитесь к преподавателю за ссылкой для вступления в группу.", false)
 	} else {
-		forwardToGroup(update, group)
+		if update.Message.ReplyToMessage != nil {
+			CatchAnswerOnAdminQuestion(update)
+		} else {
+			forwardToGroup(update, group)
+		}
 	}
 }
 
@@ -565,7 +639,7 @@ func SendFirstNotAnsweredQuestion(userID int) {
 		return
 	}
 
-	bot.SendMessage(userID, "📨 Новый вопрос:", false)
+	bot.SendMessage(userID, fmt.Sprintf("📨 Новый вопрос, его ID \\- `%d`", adminMsgID), true)
 	forwarded := bot.SendForward(
 		int64(userID),
 		groupID,

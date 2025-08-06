@@ -154,7 +154,7 @@ func (DB *DataBaseSites) NewChat(update tgbotapi.Update) error {
         CREATE TABLE IF NOT EXISTS %s (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             admin_msg_id INTEGER NOT NULL,
-            question_text TEXT NOT NULL
+            question_text TEXT
         )`, tableName))
 	if err != nil {
 		return fmt.Errorf("failed to create questions table: %v", err)
@@ -532,4 +532,71 @@ func (DB *DataBaseSites) GetFirstNotAnsweredQuestion(userID int) (adminMsgID int
 	}
 
 	return adminMsgID, groupID, nil
+}
+
+func (DB *DataBaseSites) IsAdminQuestion(adminMsgID int, groupID int64) (bool, error) {
+	tableName := fmt.Sprintf("questions_%d", int64(math.Abs(float64(groupID))))
+
+	var exists bool
+	err := DB.DB.QueryRow(fmt.Sprintf(`
+        SELECT EXISTS(
+            SELECT 1 FROM %s 
+            WHERE admin_msg_id = ?
+        )`, tableName), adminMsgID).Scan(&exists)
+
+	if err != nil {
+		return false, fmt.Errorf("failed to check question existence: %v", err)
+	}
+
+	return exists, nil
+}
+
+func (DB *DataBaseSites) DidUserAnswered(userID, adminMsgID int, groupID int64) (bool, error) {
+	tableName := fmt.Sprintf("answers_%d", int64(math.Abs(float64(groupID))))
+
+	var exists bool
+	err := DB.DB.QueryRow(fmt.Sprintf(`
+        SELECT EXISTS(
+            SELECT 1 FROM %s 
+            WHERE user_id = ? AND admin_msg_id = ?
+        )`, tableName), userID, adminMsgID).Scan(&exists)
+
+	if err != nil {
+		return false, fmt.Errorf("failed to check answer existence: %v", err)
+	}
+
+	return exists, nil
+}
+
+func (DB *DataBaseSites) AddUserAnswerOnAdminQuestion(userID, userMsgID, adminMsgID int, groupID int64, answer string) error {
+	tableName := fmt.Sprintf("answers_%d", int64(math.Abs(float64(groupID))))
+
+	_, err := DB.DB.Exec(fmt.Sprintf(`
+        INSERT INTO %s (user_id, user_msg_id, admin_msg_id, answer_text)
+        VALUES (?, ?, ?, ?)`, tableName),
+		userID, userMsgID, adminMsgID, answer)
+
+	if err != nil {
+		return fmt.Errorf("failed to insert answer: %v", err)
+	}
+
+	return nil
+}
+
+func (DB *DataBaseSites) GetAdminQuestionID(adminMsgID int, groupID int64) (int, error) {
+	tableName := fmt.Sprintf("questions_%d", int64(math.Abs(float64(groupID))))
+
+	var questionID int
+	err := DB.DB.QueryRow(fmt.Sprintf(`
+        SELECT id FROM %s 
+        WHERE admin_msg_id = ?`, tableName), adminMsgID).Scan(&questionID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("question not found")
+		}
+		return 0, fmt.Errorf("database error: %v", err)
+	}
+
+	return questionID, nil
 }
