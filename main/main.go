@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"tgbot"
+	"time"
 )
 
 var DB my_database.DataBaseSites
@@ -162,6 +163,8 @@ func printHeadOfQuestion(chatID int, user_name string, user_id int) {
 			user_name, user_id), true,
 	)
 }
+
+const askConst = "Ответьте на мое сообщение, полностью сформулировав вопрос и приложив все необходимые файлы. Затем я задам этот вопрос всем пользователям, присоединенным в группу."
 
 func CatchGroupCommand(update tgbotapi.Update) {
 	if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
@@ -356,20 +359,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		}
 
 	case "ask":
-		id, err := DB.AddQuestionFromAdmin(update, cfg.MaxlenInPreview)
-		if err != nil {
-			bot.SendMessage(
-				int(update.Message.Chat.ID),
-				"❌ Ошибка: Не удалось добавить вопрос в базу данных. "+
-					"Подробнее: "+err.Error(), false,
-			)
-		} else {
-			bot.SendMessage(
-				int(update.Message.Chat.ID),
-				fmt.Sprintf("✅ Вопрос успешно добавлен в базу данных\\! Его id \\- `%d`",
-					id), true,
-			)
-		}
+		bot.SendMessage(int(update.Message.Chat.ID), askConst, false)
 	}
 }
 
@@ -387,6 +377,10 @@ func addInNewGroup(update tgbotapi.Update) {
 			int(update.Message.Chat.ID),
 			"❌ Ошибка, добавьте бота в группу заново."+
 				"Подробнее: "+err.Error(), false,
+		)
+	} else {
+		bot.SendMessage(
+			int(update.Message.Chat.ID), "✅ Бот успешно добавлен в группу", false,
 		)
 	}
 }
@@ -423,6 +417,37 @@ func replyAdmin(update tgbotapi.Update) {
 		fmt.Sprintf("✅ Ваш ответ отправлен пользователю с ID \\- `%d`", userChatID), true, update.Message.MessageID,
 	)
 	DB.DelQuestionFromUser(*repliedMsg)
+}
+
+func replyAsk(update tgbotapi.Update) {
+	id, err := DB.AddQuestionFromAdmin(update)
+	if err != nil {
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			"❌ Ошибка: Не удалось добавить вопрос в базу данных. "+
+				"Подробнее: "+err.Error(), false,
+		)
+	} else {
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			fmt.Sprintf("✅ Вопрос успешно добавлен в базу данных\\! Его id \\- `%d`",
+				id), true,
+		)
+	}
+}
+
+func CatchReplyGroup(update tgbotapi.Update) {
+	repliedMsg := update.Message.ReplyToMessage
+
+	_, exists := DB.GetUserChatIdByAdminChatId(*repliedMsg)
+	if exists {
+		replyAdmin(update)
+		return
+	}
+	if repliedMsg.Text == askConst {
+		replyAsk(update)
+		return
+	}
 }
 
 func CatchPrivateMessage(update tgbotapi.Update) {
@@ -469,7 +494,7 @@ func CatchGroupMessage(update tgbotapi.Update) {
 		CatchGroupCommand(update)
 	} else {
 		if update.Message.ReplyToMessage != nil && update.Message.ReplyToMessage.From.IsBot {
-			replyAdmin(update)
+			CatchReplyGroup(update)
 		}
 	}
 }
@@ -521,7 +546,62 @@ func CatchPrivateCallbackQuery(update tgbotapi.Update) {
 }
 
 func CatchCallbackQuery(update tgbotapi.Update) {
+	if update.Message.Chat.Type == "private" {
+		CatchPrivateCallbackQuery(update)
+	} else {
+		CatchGroupCallbackQuery(update)
+	}
+}
 
+func SendFirstNotAnsweredQuestion(userID int) {
+	adminMsgID, groupID, err := DB.GetFirstNotAnsweredQuestion(userID)
+	if DB.IsBanned(userID, groupID) {
+		return
+	}
+	if err != nil {
+		if err.Error() != "no questions available" {
+			log.Printf("[ERROR] User %d: %v", userID, err)
+		}
+		return
+	}
+
+	bot.SendMessage(userID, "📨 Новый вопрос:", false)
+	forwarded := bot.SendForward(
+		int64(userID),
+		groupID,
+		adminMsgID,
+	)
+
+	if forwarded.MessageID == 0 {
+		log.Printf("[ERROR] Failed to forward message to user %d", userID)
+	}
+}
+
+func startQuestionSender(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		sendQuestionsToUsers()
+	}
+}
+
+func sendQuestionsToUsers() {
+	rows, err := DB.DB.Query("SELECT user_id FROM users WHERE user_group != -1 AND banned = 0")
+	if err != nil {
+		log.Printf("DB error: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var userID int
+	for rows.Next() {
+		if err := rows.Scan(&userID); err != nil {
+			log.Printf("Error scanning user: %v", err)
+			continue
+		}
+		SendFirstNotAnsweredQuestion(userID)
+	}
 }
 
 func main() {
@@ -532,6 +612,8 @@ func main() {
 		catchError(err)
 	}(DB.DB)
 	log.Println("Connected to database")
+
+	go startQuestionSender(1 * time.Minute)
 
 	bot.Init(cfg.TGBotKey)
 	u := tgbotapi.NewUpdate(0)

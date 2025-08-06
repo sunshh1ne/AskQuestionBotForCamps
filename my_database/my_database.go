@@ -119,6 +119,18 @@ func (DB *DataBaseSites) GetPassword(len int) string {
 }
 
 func (DB *DataBaseSites) NewChat(update tgbotapi.Update) error {
+	var exists bool
+	err := DB.DB.QueryRow(`
+        SELECT EXISTS(SELECT 1 FROM chats WHERE chat_id = ?)`,
+		update.Message.Chat.ID).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("failed to check chat existence: %v", err)
+	}
+
+	if exists {
+		return nil
+	}
+
 	tx, err := DB.DB.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %v", err)
@@ -154,6 +166,7 @@ func (DB *DataBaseSites) NewChat(update tgbotapi.Update) error {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             user_msg_id INTEGER NOT NULL,
+            admin_msg_id INTEGER NOT NULL,
             answer_text TEXT NOT NULL
         )`, tableName))
 	if err != nil {
@@ -466,11 +479,8 @@ func (DB *DataBaseSites) DeleteQuestionsFromUsers(group int64) (int, error) {
 	return DB.DeleteQuestionsByUsers("users", group)
 }
 
-func (DB *DataBaseSites) AddQuestionFromAdmin(update tgbotapi.Update, maxLen int) (int64, error) {
+func (DB *DataBaseSites) AddQuestionFromAdmin(update tgbotapi.Update) (int64, error) {
 	text := update.Message.CommandArguments()
-	if len(text) > maxLen {
-		text = text[:maxLen]
-	}
 
 	chatID := int64(math.Abs(float64(update.Message.Chat.ID)))
 	adminMsgID := update.Message.MessageID
@@ -490,4 +500,36 @@ func (DB *DataBaseSites) AddQuestionFromAdmin(update tgbotapi.Update, maxLen int
 	}
 
 	return id, nil
+}
+
+func (DB *DataBaseSites) GetFirstNotAnsweredQuestion(userID int) (adminMsgID int, groupID int64, err error) {
+	groupID = DB.GetGroupByUserID(userID)
+	if groupID == 0 {
+		return 0, 0, fmt.Errorf("user has no group assigned")
+	}
+
+	groupABS := int64(math.Abs(float64(groupID)))
+	questionsTable := fmt.Sprintf("questions_%d", groupABS)
+	answersTable := fmt.Sprintf("answers_%d", groupABS)
+
+	query := fmt.Sprintf(`
+        SELECT q.admin_msg_id 
+        FROM %s q
+        WHERE NOT EXISTS (
+            SELECT 1 FROM %s a 
+            WHERE a.admin_msg_id = q.admin_msg_id 
+            AND a.user_id = ?
+        )
+        ORDER BY q.id ASC
+        LIMIT 1`, questionsTable, answersTable)
+
+	err = DB.DB.QueryRow(query, userID).Scan(&adminMsgID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, groupID, fmt.Errorf("no unanswered questions")
+		}
+		return 0, groupID, fmt.Errorf("database error: %v", err)
+	}
+
+	return adminMsgID, groupID, nil
 }
