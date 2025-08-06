@@ -481,8 +481,7 @@ func (DB *DataBaseSites) DeleteQuestionsFromUsers(group int64) (int, error) {
 }
 
 func (DB *DataBaseSites) AddQuestionFromAdmin(update tgbotapi.Update) (int64, error) {
-	text := update.Message.CommandArguments()
-
+	text := update.Message.Text
 	chatID := int64(math.Abs(float64(update.Message.Chat.ID)))
 	adminMsgID := update.Message.MessageID
 	tableName := fmt.Sprintf("questions_%d", chatID)
@@ -738,4 +737,53 @@ func (DB *DataBaseSites) GetUserIDByUsername(username string) (int, error) {
 func (DB *DataBaseSites) SetUsername(userID int, userName string) error {
 	_, err := DB.DB.Exec("UPDATE users SET username = ? WHERE user_id = ?", userName, userID)
 	return err
+}
+
+func (DB *DataBaseSites) GetAdminQuestions(groupID int64) ([]int, []int, []string) {
+	tableName := fmt.Sprintf("questions_%d", int64(math.Abs(float64(groupID))))
+
+	var tableExists int
+	err := DB.DB.QueryRow(`
+        SELECT COUNT(*) FROM sqlite_master 
+        WHERE type='table' AND name=?
+    `, tableName).Scan(&tableExists)
+
+	if err != nil || tableExists == 0 {
+		return []int{}, []int{}, []string{}
+	}
+
+	rows, err := DB.DB.Query(fmt.Sprintf(`
+        SELECT id, admin_msg_id, question_text 
+        FROM %s
+        ORDER BY id
+    `, tableName))
+
+	if err != nil {
+		return []int{}, []int{}, []string{}
+	}
+	defer rows.Close()
+
+	var ids []int
+	var admin_msg_ids []int
+	var texts []string
+
+	for rows.Next() {
+		var id int
+		var admin_msg_id int
+		var text string
+
+		if err := rows.Scan(&id, &admin_msg_id, &text); err != nil {
+			continue
+		}
+
+		ids = append(ids, id)
+		admin_msg_ids = append(admin_msg_ids, admin_msg_id)
+		texts = append(texts, text)
+	}
+
+	if err := rows.Err(); err != nil {
+		return []int{}, []int{}, []string{}
+	}
+
+	return ids, admin_msg_ids, texts
 }

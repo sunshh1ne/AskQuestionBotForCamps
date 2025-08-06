@@ -164,6 +164,14 @@ func printHeadOfQuestion(chatID int, user_name string, user_id int) {
 	)
 }
 
+func printHeadOfAdminQuestion(chatID int64, question_id int) {
+	bot.SendMessage(
+		int(chatID),
+		fmt.Sprintf("❓ Вопрос с *ID:* `%d`",
+			question_id), true,
+	)
+}
+
 const askConst = "Ответьте на мое сообщение, полностью сформулировав вопрос и приложив все необходимые файлы. Затем я задам этот вопрос всем пользователям, присоединенным к группе."
 
 func CatchGroupCommand(update tgbotapi.Update) {
@@ -177,7 +185,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 	case "getlink":
 		bot.SendMessage(int(update.Message.Chat.ID), "Ссылка для записи в группу: "+getLinkForUsers(update), false)
 
-	case "getquestions":
+	case "getuserq":
 		user_ids, admin_msg_ids, user_msg_ids, user_chat_ids, user_names, group_ids := DB.GetQuestionsFromUsers(cfg.CountOfQuestions, update.Message.Chat.ID)
 		if len(user_chat_ids) == 0 {
 			bot.SendMessage(int(update.Message.Chat.ID), "✅ Список неотвеченных вопросов пуст", false)
@@ -406,6 +414,36 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		}
 		results := FormatAnswersForTelegram(answers)
 		bot.SendMessage(int(update.Message.Chat.ID), results, false)
+
+	case "getadminq":
+		question_ids, admin_msg_ids, questions := DB.GetAdminQuestions(update.Message.Chat.ID)
+		if len(questions) == 0 {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				"Нет ни одного заданного вопроса ", false,
+			)
+			return
+		}
+
+		bot.SendMessage(
+			int(update.Message.Chat.ID),
+			fmt.Sprintf("📬 *Заданные вопросы \\(%d\\):*", len(questions)), true,
+		)
+
+		for i := 0; i < len(questions); i++ {
+			printHeadOfAdminQuestion(update.Message.Chat.ID, question_ids[i])
+			sent := bot.SendForward(update.Message.Chat.ID,
+				update.Message.Chat.ID,
+				admin_msg_ids[i])
+			fmt.Println(sent)
+
+			if i+1 < len(questions) {
+				bot.SendMessage(
+					int(update.Message.Chat.ID),
+					"────────────────", false,
+				)
+			}
+		}
 	}
 }
 
