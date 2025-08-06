@@ -43,7 +43,8 @@ func createTables(db *sql.DB) {
 			user_name       TEXT,
 			user_surname    TEXT,
 			user_all_groups TEXT,
-			banned          INTEGER DEFAULT (0) 
+			banned          INTEGER DEFAULT (0),
+        	username        TEXT
 		);`,
 		`CREATE TABLE IF NOT EXISTS passwords (
     		password TEXT
@@ -653,4 +654,88 @@ func (DB *DataBaseSites) DelLastAdminQuestion(groupID int64) error {
 	}
 
 	return DB.DelAdminQuestion(lastAdminMsgID, groupID)
+}
+
+func (DB *DataBaseSites) GetAnswersForQuestion(adminMsgID int, groupID int64) (map[int]string, error) {
+	answersTable := fmt.Sprintf("answers_%d", int64(math.Abs(float64(groupID))))
+
+	// Запрос всех ответов на вопрос
+	rows, err := DB.DB.Query(fmt.Sprintf(`
+        SELECT user_id, answer_text 
+        FROM %s 
+        WHERE admin_msg_id = ? 
+        ORDER BY id ASC`, answersTable), adminMsgID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query answers: %v", err)
+	}
+	defer rows.Close()
+
+	results := make(map[int]string)
+
+	var userID int
+	var answerText string
+
+	for rows.Next() {
+		if err := rows.Scan(&userID, &answerText); err != nil {
+			return nil, fmt.Errorf("failed to scan answer: %v", err)
+		}
+		results[userID] = answerText
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %v", err)
+	}
+
+	return results, nil
+}
+
+func (DB *DataBaseSites) GetAdminMsgIDByQuestionIDAndGroupID(questionID int, groupID int64) (int, error) {
+	tableName := fmt.Sprintf("questions_%d", int64(math.Abs(float64(groupID))))
+
+	var adminMsgID int
+	err := DB.DB.QueryRow(fmt.Sprintf(`
+        SELECT admin_msg_id FROM %s 
+        WHERE id = ?`, tableName), questionID).Scan(&adminMsgID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("question with ID %d not found in group %d", questionID, groupID)
+		}
+		return 0, fmt.Errorf("database error: %v", err)
+	}
+
+	return adminMsgID, nil
+}
+
+func (DB *DataBaseSites) GetUsernameByUserID(userID int) (string, error) {
+	var username string
+
+	err := DB.DB.QueryRow("SELECT username FROM users WHERE user_id = ?", userID).Scan(&username)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("user with ID %d not found", userID)
+		}
+		return "", fmt.Errorf("error querying database: %v", err)
+	}
+
+	return username, nil
+}
+
+func (DB *DataBaseSites) GetUserIDByUsername(username string) (int, error) {
+	var userID int
+
+	err := DB.DB.QueryRow("SELECT user_id FROM users WHERE username = ?", username).Scan(&userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("user with username %s not found", username)
+		}
+		return 0, fmt.Errorf("error querying database: %v", err)
+	}
+
+	return userID, nil
+}
+
+func (DB *DataBaseSites) SetUsername(userID int, userName string) error {
+	_, err := DB.DB.Exec("UPDATE users SET username = ? WHERE user_id = ?", userName, userID)
+	return err
 }

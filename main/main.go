@@ -375,6 +375,37 @@ func CatchGroupCommand(update tgbotapi.Update) {
 			int(update.Message.Chat.ID),
 			"✅ Успешно удален последний вопрос ", true,
 		)
+
+	case "getanswers":
+		qId, err := strconv.Atoi(update.Message.CommandArguments())
+		if err != nil {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				"❌ Ошибка: Проверьте, что вы корректно ввели ID вопроса. "+
+					"Подробнее: "+err.Error(), false,
+			)
+			return
+		}
+		adminMsgID, err := DB.GetAdminMsgIDByQuestionIDAndGroupID(qId, update.Message.Chat.ID)
+		if err != nil {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				"❌ Ошибка: Не получилось найти ID оригинального сообщения с вопросом. "+
+					"Подробнее: "+err.Error(), false,
+			)
+			return
+		}
+		answers, err := DB.GetAnswersForQuestion(adminMsgID, update.Message.Chat.ID)
+		if err != nil {
+			bot.SendMessage(
+				int(update.Message.Chat.ID),
+				"❌ Ошибка: Не получилось найти ответы на вопрос. "+
+					"Подробнее: "+err.Error(), false,
+			)
+			return
+		}
+		results := FormatAnswersForTelegram(answers)
+		bot.SendMessage(int(update.Message.Chat.ID), results, false)
 	}
 }
 
@@ -536,6 +567,7 @@ func CatchAnswerOnAdminQuestion(update tgbotapi.Update) {
 }
 
 func CatchPrivateMessage(update tgbotapi.Update) {
+	setUsername(update)
 	if update.Message.IsCommand() {
 		CatchPrivateCommand(update)
 		return
@@ -690,6 +722,41 @@ func sendQuestionsToUsers() {
 			continue
 		}
 		SendFirstNotAnsweredQuestion(userID)
+	}
+}
+
+func FormatAnswersForTelegram(answers map[int]string) string {
+	var sb strings.Builder
+	sb.WriteString("📝 Ответы на вопрос:\n\n")
+
+	for userID, answer := range answers {
+		userNameSurname := DB.GetName(userID)
+
+		userInfo := fmt.Sprintf("🆔 ID: %d", userID)
+		userInfo += fmt.Sprintf("\n👤 Имя: %s", userNameSurname)
+
+		userName, err := DB.GetUsernameByUserID(userID)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		if userName != "" {
+			userInfo += fmt.Sprintf("\n🔗 @%s\n", userName)
+		}
+
+		sb.WriteString(userInfo)
+		sb.WriteString(fmt.Sprintf("👤 %s\n", strings.TrimSpace(userName)))
+		sb.WriteString(fmt.Sprintf("💬 %s\n\n", answer))
+	}
+
+	return sb.String()
+}
+
+func setUsername(update tgbotapi.Update) {
+	userName := update.Message.From.UserName
+	err := DB.SetUsername(update.Message.From.ID, userName)
+	if err != nil {
+		log.Println(err)
 	}
 }
 
