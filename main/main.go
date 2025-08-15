@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"config"
 	"database/sql"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/xuri/excelize/v2"
 	"log"
 	"my_database"
 	"strconv"
@@ -443,6 +445,81 @@ func CatchGroupCommand(update tgbotapi.Update) {
 					"────────────────", false,
 				)
 			}
+		}
+
+	case "export":
+		args := update.Message.CommandArguments()
+		if args == "" {
+			bot.SendMessage(int(update.Message.Chat.ID), "❌ Укажите ID вопроса: /export <ID>", false)
+			return
+		}
+
+		qID, err := strconv.Atoi(args)
+		if err != nil {
+			bot.SendMessage(int(update.Message.Chat.ID), "❌ Некорректный ID вопроса", false)
+			return
+		}
+
+		adminMsgID, err := DB.GetAdminMsgIDByQuestionIDAndGroupID(qID, update.Message.Chat.ID)
+		if err != nil {
+			bot.SendMessage(int(update.Message.Chat.ID), "❌ Вопрос не найден: "+err.Error(), false)
+			return
+		}
+
+		answers, err := DB.GetAnswersForQuestion(adminMsgID, update.Message.Chat.ID)
+		if err != nil {
+			bot.SendMessage(int(update.Message.Chat.ID), "❌ Ошибка получения ответов: "+err.Error(), false)
+			return
+		}
+
+		if len(answers) == 0 {
+			bot.SendMessage(int(update.Message.Chat.ID), "ℹ️ Нет ответов на этот вопрос", false)
+			return
+		}
+
+		f := excelize.NewFile()
+		f.DeleteSheet("Sheet1")
+
+		sheetName := "Ответы"
+		index, _ := f.NewSheet(sheetName)
+		f.SetActiveSheet(index)
+
+		headers := []string{"ID пользователя", "Текст ответа"}
+		for col, header := range headers {
+			cell, _ := excelize.CoordinatesToCellName(col+1, 1)
+			if err := f.SetCellValue(sheetName, cell, header); err != nil {
+				log.Printf("Ошибка записи заголовка: %v", err)
+			}
+		}
+
+		row := 2
+		for userID, answerText := range answers {
+			if err := f.SetCellInt(sheetName, fmt.Sprintf("A%d", row), int64(userID)); err != nil {
+				log.Printf("Ошибка записи UserID: %v", err)
+			}
+
+			if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), answerText); err != nil {
+				log.Printf("Ошибка записи текста: %v", err)
+			}
+
+			row++
+		}
+
+		var buf bytes.Buffer
+		if err := f.Write(&buf); err != nil {
+			bot.SendMessage(int(update.Message.Chat.ID), "❌ Ошибка создания файла: "+err.Error(), false)
+			return
+		}
+
+		fileName := fmt.Sprintf("answers_q%d.xlsx", qID)
+		if _, err := bot.Bot.Send(tgbotapi.NewDocumentUpload(
+			update.Message.Chat.ID,
+			tgbotapi.FileBytes{
+				Name:  fileName,
+				Bytes: buf.Bytes(),
+			},
+		)); err != nil {
+			bot.SendMessage(int(update.Message.Chat.ID), "❌ Ошибка отправки: "+err.Error(), false)
 		}
 	}
 }
