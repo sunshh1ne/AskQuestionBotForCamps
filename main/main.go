@@ -448,57 +448,140 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		}
 
 	case "export":
+		groupID := update.Message.Chat.ID
 		args := update.Message.CommandArguments()
 		if args == "" {
-			bot.SendMessage(int(update.Message.Chat.ID), "❌ Укажите ID вопроса: /export <ID>", false)
+			questions, err := DB.GetAllQuestions(groupID)
+			if err != nil {
+				bot.SendMessage(int(groupID), "❌ Ошибка получения вопросов: "+err.Error(), false)
+				return
+			}
+
+			if len(questions) == 0 {
+				bot.SendMessage(int(groupID), "ℹ️ В этой группе нет вопросов", false)
+				return
+			}
+
+			f := excelize.NewFile()
+			sheet := "Ответы"
+			index, _ := f.NewSheet(sheet)
+			f.DeleteSheet(f.GetSheetList()[0])
+			f.SetActiveSheet(index)
+
+			cell, _ := excelize.CoordinatesToCellName(1, 1)
+			f.SetCellValue(sheet, cell, "userID")
+
+			cell, _ = excelize.CoordinatesToCellName(2, 1)
+			f.SetCellValue(sheet, cell, "Имя")
+
+			for col, q := range questions {
+				cell, _ := excelize.CoordinatesToCellName(col+4, 1)
+				f.SetCellValue(sheet, cell, fmt.Sprintf("Q%d: %s", q.ID, q.Text))
+			}
+
+			allUsers := make(map[int]bool)
+			answersMap := make(map[int]map[int]string) // userID -> questionID -> answer
+
+			for _, q := range questions {
+				answers, err := DB.GetAnswersForQuestion(q.AdminMsgID, groupID)
+				if err != nil {
+					continue
+				}
+
+				for userID, answer := range answers {
+					allUsers[userID] = true
+					if answersMap[userID] == nil {
+						answersMap[userID] = make(map[int]string)
+					}
+					answersMap[userID][q.ID] = answer
+				}
+			}
+
+			row := 2
+			for userID := range allUsers {
+				f.SetCellValue(sheet, fmt.Sprintf("A%d", row), userID)
+				f.SetCellValue(sheet, fmt.Sprintf("B%d", row), DB.GetName(userID))
+
+				for col, q := range questions {
+					cell, _ := excelize.CoordinatesToCellName(col+4, row)
+					if answer, exists := answersMap[userID][q.ID]; exists {
+						answer = "`" + answer + "`"
+						f.SetCellValue(sheet, cell, answer)
+					} else {
+						f.SetCellValue(sheet, cell, "-")
+					}
+				}
+				row++
+			}
+
+			var buf bytes.Buffer
+			if err := f.Write(&buf); err != nil {
+				bot.SendMessage(int(groupID), "❌ Ошибка создания файла", false)
+				return
+			}
+
+			fileName := fmt.Sprintf("answers_group_%d.xlsx", groupID)
+			doc := tgbotapi.NewDocumentUpload(groupID, tgbotapi.FileBytes{
+				Name:  fileName,
+				Bytes: buf.Bytes(),
+			})
+			if _, err := bot.Bot.Send(doc); err != nil {
+				bot.SendMessage(int(groupID), "❌ Ошибка отправки файла", false)
+			}
 			return
 		}
 
 		qID, err := strconv.Atoi(args)
 		if err != nil {
-			bot.SendMessage(int(update.Message.Chat.ID), "❌ Некорректный ID вопроса", false)
+			bot.SendMessage(int(groupID), "❌ Некорректный ID вопроса", false)
 			return
 		}
 
-		adminMsgID, err := DB.GetAdminMsgIDByQuestionIDAndGroupID(qID, update.Message.Chat.ID)
+		adminMsgID, err := DB.GetAdminMsgIDByQuestionIDAndGroupID(qID, groupID)
 		if err != nil {
-			bot.SendMessage(int(update.Message.Chat.ID), "❌ Вопрос не найден: "+err.Error(), false)
+			bot.SendMessage(int(groupID), "❌ Вопрос не найден: "+err.Error(), false)
 			return
 		}
 
-		answers, err := DB.GetAnswersForQuestion(adminMsgID, update.Message.Chat.ID)
+		answers, err := DB.GetAnswersForQuestion(adminMsgID, groupID)
 		if err != nil {
-			bot.SendMessage(int(update.Message.Chat.ID), "❌ Ошибка получения ответов: "+err.Error(), false)
+			bot.SendMessage(int(groupID), "❌ Ошибка получения ответов: "+err.Error(), false)
 			return
 		}
 
 		if len(answers) == 0 {
-			bot.SendMessage(int(update.Message.Chat.ID), "ℹ️ Нет ответов на этот вопрос", false)
+			bot.SendMessage(int(groupID), "ℹ️ Нет ответов на этот вопрос", false)
 			return
 		}
 
 		f := excelize.NewFile()
+		sheet := "Ответы"
+		index, _ := f.NewSheet(sheet)
 		f.DeleteSheet("Sheet1")
-
-		sheetName := "Ответы"
-		index, _ := f.NewSheet(sheetName)
 		f.SetActiveSheet(index)
+
+		cell, _ := excelize.CoordinatesToCellName(1, 1)
+		f.SetCellValue(sheet, cell, "userID")
 
 		headers := []string{"ID пользователя", "Текст ответа"}
 		for col, header := range headers {
-			cell, _ := excelize.CoordinatesToCellName(col+1, 1)
-			if err := f.SetCellValue(sheetName, cell, header); err != nil {
+			cell, _ := excelize.CoordinatesToCellName(col+2, 1)
+			if err := f.SetCellValue(sheet, cell, header); err != nil {
 				log.Printf("Ошибка записи заголовка: %v", err)
 			}
 		}
 
 		row := 2
 		for userID, answerText := range answers {
-			if err := f.SetCellInt(sheetName, fmt.Sprintf("A%d", row), int64(userID)); err != nil {
+			if err := f.SetCellInt(sheet, fmt.Sprintf("A%d", row), int64(userID)); err != nil {
 				log.Printf("Ошибка записи UserID: %v", err)
 			}
 
-			if err := f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), answerText); err != nil {
+			if err := f.SetCellValue(sheet, fmt.Sprintf("B%d", row), DB.GetName(userID)); err != nil {
+				log.Printf("Ошибка записи NameSurname: %v", err)
+			}
+			answerText = "`" + answerText + "`"
+			if err := f.SetCellValue(sheet, fmt.Sprintf("C%d", row), answerText); err != nil {
 				log.Printf("Ошибка записи текста: %v", err)
 			}
 
@@ -507,19 +590,19 @@ func CatchGroupCommand(update tgbotapi.Update) {
 
 		var buf bytes.Buffer
 		if err := f.Write(&buf); err != nil {
-			bot.SendMessage(int(update.Message.Chat.ID), "❌ Ошибка создания файла: "+err.Error(), false)
+			bot.SendMessage(int(groupID), "❌ Ошибка создания файла: "+err.Error(), false)
 			return
 		}
 
 		fileName := fmt.Sprintf("answers_q%d.xlsx", qID)
 		if _, err := bot.Bot.Send(tgbotapi.NewDocumentUpload(
-			update.Message.Chat.ID,
+			groupID,
 			tgbotapi.FileBytes{
 				Name:  fileName,
 				Bytes: buf.Bytes(),
 			},
 		)); err != nil {
-			bot.SendMessage(int(update.Message.Chat.ID), "❌ Ошибка отправки: "+err.Error(), false)
+			bot.SendMessage(int(groupID), "❌ Ошибка отправки: "+err.Error(), false)
 		}
 	}
 }

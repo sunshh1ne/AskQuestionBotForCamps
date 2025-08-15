@@ -787,3 +787,40 @@ func (DB *DataBaseSites) GetAdminQuestions(groupID int64) ([]int, []int, []strin
 
 	return ids, admin_msg_ids, texts
 }
+
+func (DB *DataBaseSites) GetAllQuestions(groupID int64) ([]struct {
+	ID         int
+	AdminMsgID int
+	Text       string
+}, error) {
+	tableName := fmt.Sprintf("questions_%d", int64(math.Abs(float64(groupID))))
+
+	var questions []struct {
+		ID         int
+		AdminMsgID int
+		Text       string
+	}
+
+	rows, err := DB.DB.Query(fmt.Sprintf(`
+        SELECT id, admin_msg_id, question_text 
+        FROM %s 
+        ORDER BY id`, tableName))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var q struct {
+			ID         int
+			AdminMsgID int
+			Text       string
+		}
+		if err := rows.Scan(&q.ID, &q.AdminMsgID, &q.Text); err != nil {
+			return nil, err
+		}
+		questions = append(questions, q)
+	}
+
+	return questions, nil
+}
