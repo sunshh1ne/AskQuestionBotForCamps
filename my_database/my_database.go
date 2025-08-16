@@ -824,3 +824,29 @@ func (DB *DataBaseSites) GetAllQuestions(groupID int64) ([]struct {
 
 	return questions, nil
 }
+
+func (DB *DataBaseSites) GetAllUsersInGroup(groupID int64) []int {
+	var userIDs []int
+
+	rows, err := DB.DB.Query("SELECT user_id FROM users WHERE user_group = ?", groupID)
+	if err != nil {
+		log.Println("Error querying users in group:", err)
+		return userIDs
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var userID int
+		if err := rows.Scan(&userID); err != nil {
+			log.Println("Error scanning user ID:", err)
+			continue
+		}
+		userIDs = append(userIDs, userID)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Println("Error after iterating rows:", err)
+	}
+
+	return userIDs
+}

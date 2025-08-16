@@ -175,6 +175,7 @@ func printHeadOfAdminQuestion(chatID int64, question_id int) {
 }
 
 const askConst = "Ответьте на мое сообщение, полностью сформулировав вопрос и приложив все необходимые файлы. Затем я задам этот вопрос всем пользователям, присоединенным к группе."
+const messageConst = "Ответьте на мое сообщение, полностью сформулировав сообщение и приложив все необходимые файлы. Затем я перешлю это сообщение всем пользователям, присоединенным к группе."
 
 func CatchGroupCommand(update tgbotapi.Update) {
 	if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
@@ -604,6 +605,9 @@ func CatchGroupCommand(update tgbotapi.Update) {
 		)); err != nil {
 			bot.SendMessage(int(groupID), "❌ Ошибка отправки: "+err.Error(), false)
 		}
+
+	case "sendmessage":
+		bot.SendMessage(int(update.Message.Chat.ID), messageConst, false)
 	}
 }
 
@@ -680,6 +684,27 @@ func replyAsk(update tgbotapi.Update) {
 	}
 }
 
+func replyMessage(update tgbotapi.Update) {
+	groupID := update.Message.Chat.ID
+	users := DB.GetAllUsersInGroup(groupID)
+	for _, userID := range users {
+		bot.SendMessage(userID, fmt.Sprintf("📨 Объявление!!!"), false)
+		forwarded := bot.SendForward(
+			int64(userID),
+			groupID,
+			update.Message.MessageID,
+		)
+
+		if forwarded.MessageID == 0 {
+			log.Printf("[ERROR] Failed to forward message to user %d", userID)
+		}
+	}
+
+	bot.SendMessage(
+		int(update.Message.Chat.ID), "✅ Объявление успешно отправлено всем прикрепленным к группе", false,
+	)
+}
+
 func CatchReplyGroup(update tgbotapi.Update) {
 	repliedMsg := update.Message.ReplyToMessage
 
@@ -690,6 +715,10 @@ func CatchReplyGroup(update tgbotapi.Update) {
 	}
 	if repliedMsg.Text == askConst {
 		replyAsk(update)
+		return
+	}
+	if repliedMsg.Text == messageConst {
+		replyMessage(update)
 		return
 	}
 }
