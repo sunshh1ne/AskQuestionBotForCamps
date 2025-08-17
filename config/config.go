@@ -4,14 +4,16 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"time"
 )
 
 type Config struct {
-	TGBotKey         string `json:"tgbotkey"`
-	LenOfPass        int    `json:"lenofpass"`
-	CountOfQuestions int    `json:"countofquestions"`
-	QPerMin          int    `json:"questionperminute"`
-	MaxlenInPreview  int    `json:"maxleninpreview"`
+	TGBotKey                      string        `json:"tgbotkey"`
+	LenOfPass                     int           `json:"lenofpass"`
+	CountOfQuestions              int           `json:"countofquestions"`
+	QPerMin                       int           `json:"questionperminute"`
+	MaxlenInPreview               int           `json:"maxleninpreview"`
+	TimeBetweenSendingOfQuestions time.Duration `json:"timebetweensendingofquestions"`
 }
 
 func LoadConfig(filename string) Config {

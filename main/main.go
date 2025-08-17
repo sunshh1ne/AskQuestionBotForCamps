@@ -614,7 +614,6 @@ func CatchGroupCommand(update tgbotapi.Update) {
 }
 
 func getLinkForUsers(update tgbotapi.Update) string {
-
 	keyword := DB.GetKeyword(update)
 	url := "https://t.me/" + botUserName + "?start=" + keyword
 	return url
@@ -793,6 +792,7 @@ func CatchAnswerOnAdminQuestion(update tgbotapi.Update) {
 		int(update.Message.Chat.ID),
 		fmt.Sprintf("✅ Ваш ответ успешно отправлен\\. Вы ответили на вопрос с ID `%d`", adminMsgId), true,
 	)
+	SendFirstNotAnsweredQuestion(update.Message.From.ID)
 }
 
 func CatchPrivateMessage(update tgbotapi.Update) {
@@ -996,7 +996,7 @@ func main() {
 	}(DB.DB)
 	log.Println("Connected to database")
 
-	go startQuestionSender(1 * time.Minute)
+	go startQuestionSender(cfg.TimeBetweenSendingOfQuestions * time.Minute)
 
 	bot.Init(cfg.TGBotKey)
 	u := tgbotapi.NewUpdate(0)
