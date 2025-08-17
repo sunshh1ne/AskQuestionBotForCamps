@@ -988,7 +988,7 @@ func setUsername(update tgbotapi.Update) {
 }
 
 func main() {
-	cfg = config.LoadConfig("D:\\moscowsbornaya\\config.json")
+	cfg = config.LoadConfig("config.json")
 	DB.Init()
 	defer func(DB *sql.DB) {
 		err := DB.Close()
