@@ -22,6 +22,8 @@ var bot tgbot.TGBot
 var cfg config.Config
 var MU sync.Mutex
 
+var botUserName string
+
 func catchError(err error) {
 	if err != nil {
 		log.Println(err)
@@ -52,7 +54,7 @@ func adminByLink(update tgbotapi.Update) bool {
 
 func getLinkForAdmin() string {
 	pass := DB.GetPassword(cfg.LenOfPass)
-	url := "https://t.me/MoscowProgrammingTeam_bot?start=" + pass
+	url := "https://t.me/" + botUserName + "?start=" + pass
 	return url
 }
 
@@ -178,11 +180,11 @@ const askConst = "Ответьте на мое сообщение, полнос�
 const messageConst = "Ответьте на мое сообщение, полностью сформулировав сообщение и приложив все необходимые файлы. Затем я перешлю это сообщение всем пользователям, присоединенным к группе."
 
 func CatchGroupCommand(update tgbotapi.Update) {
-	if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
-		bot.SendMessage(int(update.Message.Chat.ID), "God Damn!", false)
-		detectYoungHacker(update)
-		return
-	}
+	//if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
+	//	bot.SendMessage(int(update.Message.Chat.ID), "God Damn!", false)
+	//	detectYoungHacker(update)
+	//	return
+	//}
 	command := update.Message.Command()
 	switch command {
 	case "getlink":
@@ -614,7 +616,7 @@ func CatchGroupCommand(update tgbotapi.Update) {
 func getLinkForUsers(update tgbotapi.Update) string {
 
 	keyword := DB.GetKeyword(update)
-	url := "https://t.me/MoscowProgrammingTeam_bot?start=" + keyword
+	url := "https://t.me/" + botUserName + "?start=" + keyword
 	return url
 }
 
@@ -820,19 +822,17 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 }
 
 func CatchGroupMessage(update tgbotapi.Update) {
-	//в группе ботом могут пользоваться только админы
-	if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
-		detectYoungHacker(update)
-		_, err := bot.Bot.LeaveChat(tgbotapi.ChatConfig{
-			ChatID: update.Message.Chat.ID,
-		})
-		catchError(err)
-		return
-	}
-
 	if update.Message.NewChatMembers != nil {
 		for _, member := range *update.Message.NewChatMembers {
 			if member.ID == bot.Bot.Self.ID {
+				if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
+					detectYoungHacker(update)
+					_, err := bot.Bot.LeaveChat(tgbotapi.ChatConfig{
+						ChatID: update.Message.Chat.ID,
+					})
+					catchError(err)
+					return
+				}
 				addInNewGroup(update)
 			}
 		}
@@ -907,7 +907,7 @@ func SendFirstNotAnsweredQuestion(userID int) {
 		return
 	}
 	if err != nil {
-		if err.Error() != "no questions available" {
+		if err.Error() != "no unanswered questions" {
 			log.Printf("[ERROR] User %d: %v", userID, err)
 		}
 		return
@@ -1000,6 +1000,12 @@ func main() {
 
 	bot.Init(cfg.TGBotKey)
 	u := tgbotapi.NewUpdate(0)
+
+	botInfo, err := bot.Bot.GetMe()
+	if err != nil {
+		log.Println(err)
+	}
+	botUserName = botInfo.UserName
 
 	updates, err := bot.Bot.GetUpdatesChan(u)
 	catchError(err)
