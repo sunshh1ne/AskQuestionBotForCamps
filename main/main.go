@@ -32,6 +32,16 @@ func catchError(err error) {
 
 func detectYoungHacker(update tgbotapi.Update) {
 	bot.SendMessage(update.Message.From.ID, "Oh no, La Police...", false)
+	groupID := DB.GetGroupByUserID(update.Message.From.ID)
+	if groupID == -1 {
+		return
+	}
+	bot.SendMessage(int(groupID), "Пользователь с ID "+fmt.Sprint(update.Message.From.ID)+" и ником @"+fmt.Sprint(update.Message.From.UserName)+" попытался использовать функционал, на который у него нет прав:", false)
+	if update.Message.NewChatMembers == nil && !update.Message.GroupChatCreated {
+		bot.SendForward(groupID, update.Message.Chat.ID, update.Message.MessageID)
+	} else {
+		bot.SendMessage(int(groupID), "Добавление в чат.", false)
+	}
 }
 
 func adminByLink(update tgbotapi.Update) bool {
@@ -822,6 +832,17 @@ func CatchPrivateMessage(update tgbotapi.Update) {
 }
 
 func CatchGroupMessage(update tgbotapi.Update) {
+	if update.Message.GroupChatCreated {
+		if fl, err := DB.IsAdmin(update.Message.From.ID); err == nil && !fl {
+			detectYoungHacker(update)
+			_, err := bot.Bot.LeaveChat(tgbotapi.ChatConfig{
+				ChatID: update.Message.Chat.ID,
+			})
+			catchError(err)
+			return
+		}
+		addInNewGroup(update)
+	}
 	if update.Message.NewChatMembers != nil {
 		for _, member := range *update.Message.NewChatMembers {
 			if member.ID == bot.Bot.Self.ID {
