@@ -109,7 +109,7 @@ func CatchPrivateCommand(update tgbotapi.Update) {
 		grouplink, invitable, wasingroup := groupByLink(update)
 		if grouplink != -1 {
 			if wasingroup {
-				bot.SendMessage(update.Message.From.ID, "Теперь вы задаете вопросы в группу (другая группа, названия пришпилить надо)", false)
+				bot.SendMessage(update.Message.From.ID, "Теперь вы задаете вопросы в группу", false)
 			} else if invitable {
 				bot.SendMessage(update.Message.From.ID, "Поздравляю! Вы записаны в группу. Чтобы задать вопрос, напишите мне сообщение, я перешлю его преподавателям", false)
 			} else {
